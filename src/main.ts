@@ -3,8 +3,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Viewer } from './engine/Viewer';
 import { FlyControls } from './engine/FlyControls';
 import { CameraModes, type CameraMode } from './engine/CameraModes';
+import { Sky } from './engine/Sky';
 import { defaultParams, sampleHeight, type TerrainParams } from './terrain/heightmap';
 import { TerrainMesh } from './terrain/TerrainMesh';
+import { defaultShading, type TerrainShadingParams } from './terrain/TerrainMaterial';
 import { createTerrainGui } from './terrain/gui';
 import './style.css';
 
@@ -15,26 +17,53 @@ const viewer = new Viewer(canvas);
 
 // --- Sky and atmosphere ---
 
-const SKY = 0x8fb8e8;
-viewer.scene.background = new THREE.Color(SKY);
-// Fog hides the hard edge where the terrain stops, and gives distance cues.
-viewer.scene.fog = new THREE.Fog(SKY, 180, 460);
+const sky = new Sky();
+viewer.scene.add(sky.mesh);
+viewer.onUpdate(() => sky.follow(viewer.camera));
+
+// Fog matched to the horizon colour, so the terrain edge dissolves into the
+// sky instead of ending at a visible line. Exponential-squared falls off more
+// naturally with distance than linear fog.
+viewer.scene.fog = new THREE.FogExp2(sky.horizonColor.getHex(), 0.0022);
+
+// Filmic tone mapping: the default (none) clips bright sunlit slopes to flat
+// white. This compresses highlights the way a camera does.
+viewer.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+viewer.renderer.toneMappingExposure = 1.05;
 
 // --- Lighting ---
 
 // Sky above, warm bounced ground light below: cheap outdoor ambient that keeps
 // shadowed slopes readable rather than black.
-viewer.scene.add(new THREE.HemisphereLight(SKY, 0x5a4a38, 1.1));
+const ambient = new THREE.HemisphereLight(sky.horizonColor.getHex(), 0x4a3f33, 0.85);
+viewer.scene.add(ambient);
 
-const sun = new THREE.DirectionalLight(0xfff2d8, 2.2);
+const sun = new THREE.DirectionalLight(0xfff2d8, 2.6);
 sun.position.set(-70, 90, 50);
 viewer.scene.add(sun);
 
 // --- Terrain ---
 
 const params: TerrainParams = { ...defaultParams };
+const shading: TerrainShadingParams = { ...defaultShading };
 const terrain = new TerrainMesh(params);
+terrain.applyShading(shading);
 viewer.scene.add(terrain.group);
+
+// Sun azimuth/elevation are more intuitive to tune than a position vector.
+const sunAngles = { azimuth: 135, elevation: 42 };
+
+function placeSun(): void {
+  const az = THREE.MathUtils.degToRad(sunAngles.azimuth);
+  const el = THREE.MathUtils.degToRad(sunAngles.elevation);
+  const d = 400;
+  sun.position.set(
+    Math.cos(el) * Math.sin(az) * d,
+    Math.sin(el) * d,
+    Math.cos(el) * Math.cos(az) * d,
+  );
+}
+placeSun();
 
 // --- Camera controls ---
 
@@ -93,6 +122,10 @@ const gui = createTerrainGui({
   mode: modeRef,
   onModeChange: (mode) => setMode(mode),
   flySpeed: fly,
+  shading,
+  onShadingChange: () => terrain.applyShading(shading),
+  sun: sunAngles,
+  onSunChange: placeSun,
 });
 
 // --- Camera modes ---

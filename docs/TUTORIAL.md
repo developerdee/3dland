@@ -25,6 +25,7 @@ It is written to be read in order. Each section builds on the previous one.
 11. [The dev server lifecycle](#11-the-dev-server-lifecycle)
 11a. [How the terrain actually works](#11a-how-the-terrain-actually-works)
 11b. [First-person camera control](#11b-first-person-camera-control)
+11c. [Shading: slope, altitude, and injecting GLSL](#11c-shading-slope-altitude-and-injecting-glsl)
 12. [Where this goes next](#12-where-this-goes-next)
 13. [Glossary](#13-glossary)
 
@@ -834,12 +835,120 @@ genuinely matters.
 
 ---
 
+## 11c. Shading: slope, altitude, and injecting GLSL
+
+Stage 4 replaced the placeholder vertex colours with per-pixel shading.
+
+### Why slope is the key input
+
+Altitude alone cannot distinguish a cliff face from a meadow at the same
+height — and real landscapes distinguish them sharply, because loose soil and
+vegetation cannot cling to steep rock. Slope is what makes terrain read as
+geology rather than a contour map.
+
+It is nearly free to compute. The surface normal is a unit vector pointing away
+from the surface, so its **y component is the cosine of the angle from
+vertical**: 1 on flat ground, 0 on a sheer face.
+
+```glsl
+float slope = 1.0 - clamp(vWorldNormal.y, 0.0, 1.0);
+```
+
+### Extending a material instead of writing one
+
+Three offers three levels of control:
+
+| Approach | You get | You give up |
+| --- | --- | --- |
+| Vertex colours (stage 2) | Trivial, no shader code | Per-vertex only; bands visibly |
+| `onBeforeCompile` injection | PBR lighting, fog, shadows free | Depends on Three's shader internals |
+| Full `ShaderMaterial` | Total control | Reimplement lighting, fog, tone mapping |
+
+We chose the middle one. `onBeforeCompile` hands you Three's shader source
+before it compiles, and you string-replace its `#include` markers to splice in
+your own GLSL. Roughly forty lines buys slope-aware shading on top of a full
+physically-based lighting model.
+
+The cost is honest coupling: those markers are Three's internals. They have
+been stable for years, but a major upgrade is worth re-checking.
+
+### The bug this technique invites
+
+Here is the mistake, which I made and caught before it ran:
+
+```glsl
+// In the color_fragment injection:
+diffuseColor.rgb = albedo;
+roughnessFactor = mix(0.95, 0.72, slopeRock);   // <-- broken
+```
+
+That looks reasonable. It does not compile, because `roughnessFactor` is
+*declared* in the `roughnessmap_fragment` chunk, which Three includes **after**
+`color_fragment`. You are assigning to a variable that does not exist yet.
+
+The symptom is the worst kind: the shader fails to compile, the mesh renders as
+solid black or vanishes, and the explanation is buried in a console warning
+rather than thrown as an error.
+
+The fix is two injections at two markers, passing the value between them via a
+file-scope global:
+
+```glsl
+float gSlopeRock = 0.0;              // file scope, before main()
+// ...in color_fragment:   gSlopeRock = slopeRock;
+// ...in roughnessmap_fragment:  roughnessFactor = mix(0.95, 0.72, gSlopeRock);
+```
+
+The general lesson: when injecting into someone else's shader, **the include
+order is part of the API**. Verifying which chunk declares what — and in what
+order they run — is not optional.
+
+### How the bands compose
+
+Order matters, because each layer paints over the last:
+
+```
+grass (altitude-tinted)
+  → rock, by altitude          a high plateau is bare
+  → rock, by slope             a steep face is bare at any height
+  → snow, by altitude × flatness   snow settles, then slides off steep ground
+  → sand, by low altitude × flatness
+```
+
+Snow multiplied by flatness is the detail that sells it: snow on a vertical
+cliff looks wrong immediately, and nobody can say why until it is fixed.
+
+Every transition uses `smoothstep` rather than a comparison, so the boundary is
+a gradient whose width is tunable. Noise added to the altitude *before*
+thresholding makes the lines irregular — a straight horizontal snow line is the
+most obvious tell of procedural terrain.
+
+### Sky, fog, and tone mapping
+
+Three small changes, disproportionate effect:
+
+**Gradient sky.** A flat background colour reads as a void, because real sky is
+much paler at the horizon. The dome is an inverted sphere with a two-stop
+gradient, following the camera so you can never fly out of it.
+
+**Fog matched to the horizon.** `FogExp2` falls off with the square of
+distance, which approximates atmospheric scattering better than linear fog.
+Matching its colour to the sky's horizon makes the terrain edge dissolve rather
+than end at a line.
+
+**ACES filmic tone mapping.** Without tone mapping, any surface brighter than
+1.0 clips to flat white, so sunlit slopes lose all detail. ACES compresses
+highlights the way film does. This is the single cheapest improvement in the
+stage — one line.
+
+---
+
 ## 12. Where this goes next
 
 - [x] **1 — Scaffold.** Build tooling, render loop, CI deploy.
 - [x] **2 — Terrain.** Seeded fBm heightmap, debug GUI, orbit controls, fog.
 - [x] **3 — Camera.** Pointer-lock fly and walk modes.
-- [ ] **4 — Shading.** Slope- and altitude-based materials, sky, fog.
+- [x] **4 — Shading.** Slope/altitude materials, gradient sky, tone mapping.
 - [ ] **5 — Scale.** Water; chunked terrain with LOD.
 - [ ] **6 — Interaction.** Collision and character movement.
 
@@ -866,6 +975,7 @@ earlier becomes a real decision rather than a theoretical one.
 
 | Term | Meaning |
 | --- | --- |
+| **Albedo** | A surface's base colour, before lighting |
 | **Canvas** | HTML element that is a drawable pixel rectangle |
 | **CI** | Continuous integration — automated builds on push |
 | **Delta time (`dt`)** | Seconds elapsed since the previous frame |
@@ -893,10 +1003,13 @@ earlier becomes a real decision rather than a theoretical one.
 | **Pointer lock** | Browser API giving relative mouse motion, cursor hidden |
 | **PRNG** | Pseudo-random number generator; seedable, repeatable |
 | **Roll** | Rotation about the view axis; tilting the horizon |
+| **smoothstep** | Smooth 0-1 ramp between two thresholds |
 | **Scene graph** | Tree of objects, parents transforming children |
 | **Shader** | Small program that runs on the GPU |
 | **Simplex noise** | Smooth seeded pseudo-random function |
+| **Slope** | Steepness, derived from the surface normal's y component |
 | **Source map** | File mapping built code back to original source |
+| **Tone mapping** | Compressing bright values so highlights keep detail |
 | **Tree-shaking** | Removing code nothing imports |
 | **TypeScript** | JavaScript plus compile-time types |
 | **Vertex** | A point in 3D space |

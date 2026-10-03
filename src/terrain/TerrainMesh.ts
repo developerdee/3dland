@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { generateHeightmap, type Heightmap, type TerrainParams } from './heightmap';
+import { TerrainMaterial, type TerrainShadingParams } from './TerrainMaterial';
 
 /**
  * The terrain as a renderable object: a plane whose vertices are displaced by
@@ -14,20 +15,15 @@ export class TerrainMesh {
   readonly group = new THREE.Group();
 
   private geometry: THREE.PlaneGeometry | null = null;
-  private readonly surfaceMaterial: THREE.MeshStandardMaterial;
+  private readonly surfaceMaterial: TerrainMaterial;
   private readonly wireframeMaterial: THREE.MeshBasicMaterial;
   private surface: THREE.Mesh | null = null;
   private wireframe: THREE.Mesh | null = null;
   private map: Heightmap | null = null;
 
   constructor(params: TerrainParams) {
-    // Placeholder vertex colours until stage 4 does slope/altitude shading
-    // properly; a flat colour makes the relief very hard to read.
-    this.surfaceMaterial = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.92,
-      metalness: 0.0,
-    });
+    // Slope- and altitude-driven shading, evaluated per-pixel on the GPU.
+    this.surfaceMaterial = new TerrainMaterial();
 
     this.wireframeMaterial = new THREE.MeshBasicMaterial({
       color: 0x8fb4ff,
@@ -55,6 +51,14 @@ export class TerrainMesh {
     this.wireframeMaterial.visible = visible;
   }
 
+  /**
+   * Updates shading parameters. Cheap — these are uniforms, so the change
+   * takes effect next frame with no geometry rebuild.
+   */
+  applyShading(shading: TerrainShadingParams): void {
+    this.surfaceMaterial.apply(shading);
+  }
+
   /** Regenerates heights and geometry from scratch. */
   rebuild(params: TerrainParams): void {
     this.map = generateHeightmap(params);
@@ -69,11 +73,15 @@ export class TerrainMesh {
     geometry.rotateX(-Math.PI / 2);
 
     this.displaceVertices(geometry, this.map);
-    this.applyVertexColors(geometry, this.map);
 
     // Lighting needs normals, and they are only correct once the vertices have
-    // moved — so this must come after displacement, not before.
+    // moved — so this must come after displacement, not before. The shader
+    // also derives slope from these normals, so shading depends on it too.
     geometry.computeVertexNormals();
+
+    // The shader expresses its bands as 0-1 of the terrain's range, so it
+    // needs to know what that range currently is.
+    this.surfaceMaterial.setHeightRange(this.map.min, this.map.max);
 
     this.geometry = geometry;
     this.surface = new THREE.Mesh(geometry, this.surfaceMaterial);
@@ -115,57 +123,4 @@ export class TerrainMesh {
 
     position.needsUpdate = true;
   }
-
-  /**
-   * Colours vertices by altitude, so relief is legible before real shading
-   * arrives in stage 4. Interpolating through a few bands gives sand, grass,
-   * rock and snow without any texture loading.
-   */
-  private applyVertexColors(geometry: THREE.PlaneGeometry, map: Heightmap): void {
-    const position = geometry.attributes.position as THREE.BufferAttribute;
-    const count = position.count;
-    const colors = new Float32Array(count * 3);
-
-    const range = map.max - map.min || 1;
-    const color = new THREE.Color();
-
-    for (let i = 0; i < count; i++) {
-      const t = (position.getY(i) - map.min) / range; // 0 at lowest, 1 at peak
-      bandColor(t, color);
-      colors[i * 3] = color.r;
-      colors[i * 3 + 1] = color.g;
-      colors[i * 3 + 2] = color.b;
-    }
-
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  }
-}
-
-/** Altitude bands, low to high, as [threshold, color]. */
-const BANDS: ReadonlyArray<readonly [number, number]> = [
-  [0.0, 0x3f6d4e], // deep valley green
-  [0.28, 0x5f8a4a], // grassland
-  [0.48, 0x7a7355], // scrub / dry earth
-  [0.66, 0x6e6a67], // exposed rock
-  [0.84, 0x9a9792], // high scree
-  [1.0, 0xf2f4f7], // snow
-];
-
-/** Picks a colour for normalised altitude `t`, blending between bands. */
-function bandColor(t: number, out: THREE.Color): void {
-  const clamped = Math.min(Math.max(t, 0), 1);
-
-  for (let i = 1; i < BANDS.length; i++) {
-    const [upperStop, upperColor] = BANDS[i]!;
-    if (clamped > upperStop) continue;
-
-    const [lowerStop, lowerColor] = BANDS[i - 1]!;
-    const span = upperStop - lowerStop || 1;
-    const local = (clamped - lowerStop) / span;
-
-    out.set(lowerColor).lerp(new THREE.Color(upperColor), local);
-    return;
-  }
-
-  out.set(BANDS[BANDS.length - 1]![1]);
 }

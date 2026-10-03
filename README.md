@@ -128,7 +128,9 @@ height lookups flatten outside it. Orbit is best for tuning terrain, walk for
 judging whether it actually reads as landscape — hills that look dramatic from
 above are often gentle swells at eye level.
 
-The panel top-right tunes terrain and camera speed live. The readout
+The panel top-right tunes terrain, shading, sun angle and camera speed live.
+Shading and sun changes are uniform-only, so they apply instantly without
+regenerating the terrain. The readout
 bottom-left shows FPS, triangle count, current mode, camera position, ground
 height beneath you, and the last rebuild time.
 
@@ -145,6 +147,21 @@ The parameters worth understanding:
 | `lacunarity` | How fast octaves get finer. ~2 is conventional |
 | `seed` | Any string. The same seed always rebuilds the same world |
 
+And the shading controls:
+
+| Parameter | Effect |
+| --- | --- |
+| `rock line` / `snow line` | Altitude (0-1 of range) where each material starts |
+| `shore line` | Altitude below which ground reads as sand |
+| `slope rock from` / `full` | Steepness at which rock breaks through, regardless of height |
+| `band blend` | Softness of the transitions; 0 gives hard bands |
+| `colour variation` | Noise that breaks up flat colour |
+| `azimuth` / `elevation` | Sun direction, in degrees |
+
+Slope is the input altitude alone cannot give you: a cliff and a meadow at the
+same height should not look alike. It comes from the surface normals, read
+per-pixel in the fragment shader.
+
 `seed` is why the terrain is reproducible: a hill that reveals a bug can be
 returned to exactly. `Math.random()` cannot do that, so `src/terrain/random.ts`
 implements a seeded PRNG instead.
@@ -157,8 +174,10 @@ src/main.ts                 scene assembly and entry point
 src/engine/Viewer.ts        renderer, camera, resize handling, render loop
 src/engine/FlyControls.ts   pointer-lock mouse look, WASD, ground following
 src/engine/CameraModes.ts   orbit/fly/walk switching, kept continuous
+src/engine/Sky.ts           gradient sky dome, follows the camera
 src/terrain/heightmap.ts    noise -> heights (the generation maths)
 src/terrain/TerrainMesh.ts  heights -> renderable geometry
+src/terrain/TerrainMaterial.ts  slope/altitude shading (GLSL injection)
 src/terrain/random.ts       seeded PRNG, for reproducible worlds
 src/terrain/gui.ts          lil-gui parameter panel
 src/style.css               page and HUD styling
@@ -181,9 +200,9 @@ The intent is that stages 2 onward add modules without modifying `Viewer`.
 - [x] **2 — Terrain.** Seeded fBm heightmap, vertex colours, debug GUI, orbit
       controls, sky and fog.
 - [x] **3 — Camera.** Pointer-lock fly and walk modes, with mode switching.
-- [ ] **4 — Shading.** Slope- and altitude-based materials, lighting, sky, fog.
+- [x] **4 — Shading.** Slope/altitude materials, gradient sky, fog, tone mapping.
 - [ ] **5 — Scale.** Water plane; chunked terrain with LOD for large worlds.
 - [ ] **6 — Interaction.** Terrain collision and character movement.
 
-The altitude-banded vertex colours are a placeholder so relief is legible;
-stage 4 replaces them with slope- and altitude-aware shading.
+Shading is per-pixel in the fragment shader, injected into Three's standard
+material so physically-based lighting, fog and tone mapping come for free.

@@ -1,5 +1,6 @@
 import GUI from 'lil-gui';
 import type { TerrainParams } from './heightmap';
+import type { TerrainShadingParams } from './TerrainMaterial';
 
 /** Mutable holder so the dropdown and the keyboard shortcuts stay in sync. */
 export interface ModeRef {
@@ -19,6 +20,12 @@ export interface TerrainGuiOptions {
   onModeChange: (mode: 'orbit' | 'fly' | 'walk') => void;
   /** Movement speed, exposed as a slider. */
   flySpeed: { speed: number };
+  /** Shading controls. Uniform-only, so changes need no terrain rebuild. */
+  shading: TerrainShadingParams;
+  onShadingChange: () => void;
+  /** Sun azimuth and elevation, in degrees. */
+  sun: { azimuth: number; elevation: number };
+  onSunChange: () => void;
 }
 
 /**
@@ -68,11 +75,28 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
     .name('resolution')
     .onChange(onChange);
 
+  // Shading is uniform-only, so these fire on every drag frame rather than on
+  // release — the feedback is immediate and costs nothing.
+  const { shading, onShadingChange: s } = options;
+  const look = gui.addFolder('Shading');
+  look.add(shading, 'shoreLine', 0, 0.4, 0.01).name('shore line').onChange(s);
+  look.add(shading, 'rockLine', 0, 1, 0.01).name('rock line').onChange(s);
+  look.add(shading, 'snowLine', 0, 1, 0.01).name('snow line').onChange(s);
+  look.add(shading, 'slopeRockStart', 0, 1, 0.01).name('slope rock from').onChange(s);
+  look.add(shading, 'slopeRockFull', 0, 1, 0.01).name('slope rock full').onChange(s);
+  look.add(shading, 'blend', 0.001, 0.3, 0.005).name('band blend').onChange(s);
+  look.add(shading, 'macroVariation', 0, 0.4, 0.01).name('colour variation').onChange(s);
+
+  const light = gui.addFolder('Sun');
+  light.add(options.sun, 'azimuth', 0, 360, 1).name('azimuth°').onChange(options.onSunChange);
+  light.add(options.sun, 'elevation', 2, 88, 1).name('elevation°').onChange(options.onSunChange);
+
   const display = gui.addFolder('Display');
   display.add(view, 'wireframe').name('wireframe').onChange(onWireframeChange);
 
   detail.close();
   world.close();
+  light.close();
   display.close();
 
   return gui;
