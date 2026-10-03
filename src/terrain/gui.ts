@@ -1,6 +1,11 @@
 import GUI from 'lil-gui';
 import type { TerrainParams } from './heightmap';
 
+/** Mutable holder so the dropdown and the keyboard shortcuts stay in sync. */
+export interface ModeRef {
+  value: 'orbit' | 'fly' | 'walk';
+}
+
 export interface TerrainGuiOptions {
   params: TerrainParams;
   /** Called after any parameter change, to regenerate the terrain. */
@@ -9,6 +14,11 @@ export interface TerrainGuiOptions {
   onWireframeChange: (visible: boolean) => void;
   /** Re-seeds with a random value and regenerates. */
   onRandomSeed: () => void;
+  /** Current camera mode, kept current so `updateDisplay()` reflects hotkeys. */
+  mode: ModeRef;
+  onModeChange: (mode: 'orbit' | 'fly' | 'walk') => void;
+  /** Movement speed, exposed as a slider. */
+  flySpeed: { speed: number };
 }
 
 /**
@@ -26,9 +36,16 @@ export interface TerrainGuiOptions {
  */
 export function createTerrainGui(options: TerrainGuiOptions): GUI {
   const { params, onChange, onWireframeChange, onRandomSeed } = options;
-  const gui = new GUI({ title: '3dland — terrain' });
+  const gui = new GUI({ title: '3dland' });
 
   const view = { wireframe: false };
+
+  const camera = gui.addFolder('Camera');
+  camera
+    .add(options.mode, 'value', ['orbit', 'fly', 'walk'])
+    .name('mode (O / F / G)')
+    .onChange((m: 'orbit' | 'fly' | 'walk') => options.onModeChange(m));
+  camera.add(options.flySpeed, 'speed', 5, 200, 1).name('speed (units/s)');
 
   const shape = gui.addFolder('Shape');
   shape.add(params, 'amplitude', 0, 80, 0.5).name('amplitude (height)').onChange(onChange);

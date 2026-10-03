@@ -24,6 +24,7 @@ It is written to be read in order. Each section builds on the previous one.
 10. [Deployment: CI and GitHub Pages](#10-deployment-ci-and-github-pages)
 11. [The dev server lifecycle](#11-the-dev-server-lifecycle)
 11a. [How the terrain actually works](#11a-how-the-terrain-actually-works)
+11b. [First-person camera control](#11b-first-person-camera-control)
 12. [Where this goes next](#12-where-this-goes-next)
 13. [Glossary](#13-glossary)
 
@@ -729,11 +730,115 @@ Three.js, dispose the old one.
 
 ---
 
+## 11b. First-person camera control
+
+Stage 3 added fly and walk modes. Four ideas carry it.
+
+### Pointer lock
+
+A web page normally sees only where the cursor *is*, which is useless for
+mouse-look — the cursor hits the screen edge and stops. **Pointer Lock** hides
+the cursor and switches the browser to reporting *relative* movement
+(`movementX`/`movementY`), unbounded in any direction.
+
+Two constraints the browser imposes, both for good reason:
+
+- It requires a **user gesture**. You cannot grab the mouse on page load; the
+  user must click. Hence the "click to look around" prompt.
+- <kbd>Esc</kbd> always releases it, and the page cannot prevent that.
+
+The trap worth knowing: when lock is released mid-keypress, the `keyup` never
+arrives, so a held key stays "down" forever and the camera drifts off on its
+own. `FlyControls` listens for `pointerlockchange` and clears its key set.
+
+### Yaw and pitch, not accumulated rotation
+
+The obvious implementation is to rotate the camera by the mouse delta each
+frame. It produces a subtle, maddening bug: once yaw and pitch interact,
+**roll** creeps in, and the horizon tilts. Worse, roll accumulates — it never
+self-corrects.
+
+The fix is to store two angles and rebuild the orientation from scratch:
+
+```typescript
+this.euler.set(this.pitch, this.yaw, 0, 'YXZ');
+this.camera.quaternion.setFromEuler(this.euler);
+```
+
+Roll is hardcoded to 0, so it is structurally impossible. The `'YXZ'` order
+matters: yaw is applied first, then pitch *within the camera's own frame* —
+which is exactly how a head turns, and what keeps the horizon level.
+
+Pitch is also clamped just short of ±90°. At exactly vertical, the forward
+vector aligns with world up, the cross product used for the right vector
+degenerates, and the camera flips unpredictably.
+
+### Delta time, again — and why a clamp is needed
+
+Movement is `speed * dt`, so it's frame-rate independent as discussed in
+section 5. But `dt` has a failure mode: `requestAnimationFrame` **pauses** in
+a background tab. Alt-tab away for thirty seconds, come back, and the first
+frame reports `dt = 30`. At 40 units/second that teleports you 1,200 units
+across the map.
+
+```typescript
+const step = Math.min(dt, 0.1);
+```
+
+Any single frame contributing more than 100ms of movement is a glitch, not
+real elapsed time. This is standard practice in game loops, and the symptom it
+prevents — "I tabbed back and I'm in the void" — is otherwise baffling.
+
+### Normalising the movement vector
+
+Pressing W and D adds two unit vectors, giving a vector of length √2 — so
+diagonal movement would be 41% faster than cardinal. Players discover this
+immediately and zigzag everywhere. Normalising the summed direction before
+scaling by speed fixes it:
+
+```typescript
+this.motion.normalize();
+this.motion.multiplyScalar(this.speed * step);
+```
+
+### Walk mode, and what it isn't
+
+Walk mode clamps the camera to `sampleHeight(x, z) + 1.8` every frame, using
+the bilinear interpolation written in stage 2. It feels surprisingly like
+walking, for about ten lines of code.
+
+It is **not** collision. There is nothing stopping you walking up a vertical
+cliff — you simply glide up its face at constant horizontal speed. Real
+movement needs slope limits, step heights, and a notion of being blocked.
+That's stage 6.
+
+One edge case worth noting, because it was a real bug: `sampleHeight` clamps
+coordinates to the terrain's bounds, so walking past the edge returns the edge
+height forever. You stride out over nothing, on an invisible plateau, with no
+error. Walk mode now clamps to the terrain extent; fly mode deliberately
+doesn't, so you can still get an outside view.
+
+### Two vectors, allocated once
+
+```typescript
+private readonly forward = new THREE.Vector3();
+private readonly motion = new THREE.Vector3();
+```
+
+These are instance fields, reused every frame, rather than locals created
+inside `update()`. At 60fps, allocating a handful of vectors per frame means
+thousands of short-lived objects per second, and the resulting garbage
+collection shows up as periodic stutter. Reusing scratch objects in hot paths
+is routine in game code, and this is the first place in the project where it
+genuinely matters.
+
+---
+
 ## 12. Where this goes next
 
 - [x] **1 — Scaffold.** Build tooling, render loop, CI deploy.
 - [x] **2 — Terrain.** Seeded fBm heightmap, debug GUI, orbit controls, fog.
-- [ ] **3 — Camera.** First-person / fly navigation.
+- [x] **3 — Camera.** Pointer-lock fly and walk modes.
 - [ ] **4 — Shading.** Slope- and altitude-based materials, sky, fog.
 - [ ] **5 — Scale.** Water; chunked terrain with LOD.
 - [ ] **6 — Interaction.** Collision and character movement.
@@ -781,10 +886,13 @@ earlier becomes a real decision rather than a theoretical one.
 | **Mesh** | Geometry + material; a visible object |
 | **Minify** | Shrink code by removing whitespace and renaming |
 | **Normal** | Vector describing which way a surface faces |
+| **Pitch** | Rotation about the lateral axis; looking up and down |
 | **npm** | JavaScript package registry and CLI |
 | **Octave** | One layer of noise at a given frequency/amplitude |
 | **Persistence** | Amplitude multiplier between successive octaves |
+| **Pointer lock** | Browser API giving relative mouse motion, cursor hidden |
 | **PRNG** | Pseudo-random number generator; seedable, repeatable |
+| **Roll** | Rotation about the view axis; tilting the horizon |
 | **Scene graph** | Tree of objects, parents transforming children |
 | **Shader** | Small program that runs on the GPU |
 | **Simplex noise** | Smooth seeded pseudo-random function |
@@ -793,6 +901,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **TypeScript** | JavaScript plus compile-time types |
 | **Vertex** | A point in 3D space |
 | **Vertex shader** | GPU program transforming one vertex |
+| **Yaw** | Rotation about the vertical axis; turning left and right |
 | **Vite** | Our dev server and build tool |
 | **WebGL** | Browser API for GPU-accelerated graphics |
 | **WebGPU** | WebGL's more capable successor |

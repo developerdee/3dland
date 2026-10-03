@@ -34,6 +34,57 @@ body {
   user-select: none;
 }
 
+/* Mode hint, centred low on screen. Fades out once the pointer is locked and
+   the user is actually flying, so it doesn't sit in the view permanently. */
+#hint {
+  position: fixed;
+  bottom: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.55);
+  color: #e8edf5;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 0.35s ease;
+}
+
+#hint.hidden {
+  opacity: 0;
+}
+
+#hint b {
+  color: #9fd0ff;
+  font-weight: 600;
+}
+
+#hint kbd {
+  padding: 1px 5px;
+  border: 1px solid rgb(255 255 255 / 0.3);
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.12);
+  font: inherit;
+  font-size: 0.92em;
+}
+
+/* Crosshair, shown only while the pointer is locked. */
+body:has(#hint.hidden)::after {
+  content: "";
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.75);
+  box-shadow: 0 0 2px rgb(0 0 0 / 0.8);
+  pointer-events: none;
+}
+
 /* Keep lil-gui's panel clear of the HUD. */
 .lil-gui.root {
   --width: 300px;
