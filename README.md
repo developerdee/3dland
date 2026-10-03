@@ -135,9 +135,9 @@ The **detail** control at the top of the panel trades triangles for frame rate:
 
 | Level | Mesh | Triangles |
 | --- | --- | --- |
-| low | 128² | 32k |
-| medium | 256² | 130k |
-| high | 512² | 523k |
+| low | 128² | 32k + ~2.4k props |
+| medium | 256² | 130k + ~5.4k props |
+| high | 512² | 523k + ~8.2k props |
 
 Touch devices default to low, desktop to medium. The world is the same size at
 every level — only the density changes.
@@ -168,6 +168,30 @@ The defaults are tuned together: 90 units of relief over a 1000-unit world
 reads as dramatic while keeping under 3% of the surface steeper than 45°, so
 walking works nearly everywhere. Pushing amplitude or frequency much higher
 makes it alpine and unpleasant on foot.
+
+### Vegetation parameters
+
+| Parameter | Effect |
+| --- | --- |
+| `enabled` | Vegetation on or off entirely |
+| `density` | Multiplies every species. The main performance dial |
+| `trees` / `rocks` / `shrubs` | Per-species density |
+| `treeline` | Altitude above which trees stop |
+| `tree max slope` | Steepness trees will not grow on |
+
+Around 5,400 objects at medium detail, drawn in 8 draw calls — `InstancedMesh`
+renders many copies of one geometry at once, so thousands of trees cost about
+what one tree costs in CPU overhead.
+
+Placement follows rules rather than being random: nothing underwater, nothing
+on cliffs, trees between the shoreline and a treeline, rocks favouring high
+ground where soil has eroded. Candidates come from a jittered grid rather than
+uniform random points, which avoids the bare-patch-next-to-thicket clumping
+that random placement produces.
+
+The prop meshes are built in code, not loaded — no assets, no download, and a
+variant is a parameter rather than another file. **There is no collision yet**,
+so you walk straight through everything; that's stage 6.
 
 ### Water parameters
 
@@ -220,6 +244,9 @@ src/terrain/heightmap.ts    noise -> heights (the generation maths)
 src/terrain/TerrainMesh.ts  heights -> renderable geometry
 src/terrain/TerrainMaterial.ts  slope/altitude shading (GLSL injection)
 src/terrain/Water.ts        animated water, depth from a heightmap texture
+src/terrain/placement.ts    where props go: density, slope and altitude rules
+src/terrain/props.ts        procedural low-poly tree, rock and shrub geometry
+src/terrain/Scatter.ts      instanced rendering of the placements
 src/terrain/random.ts       seeded PRNG, for reproducible worlds
 src/terrain/gui.ts          lil-gui parameter panel
 src/style.css               page and HUD styling
@@ -244,7 +271,8 @@ The intent is that stages 2 onward add modules without modifying `Viewer`.
 - [x] **3 — Camera.** Pointer-lock fly and walk modes, with mode switching.
 - [x] **4 — Shading.** Slope/altitude materials, gradient sky, fog, tone mapping.
 - [x] **5a — Water.** Depth-based colour, waves, Fresnel reflection, shore foam.
-- [ ] **5b — Chunking.** Terrain tiles with LOD, for a world without edges.
+- [x] **5b — Scatter.** Instanced trees, rocks and shrubs placed by rule.
+- [ ] **5c — Chunking.** Terrain tiles with LOD, for a world without edges.
 - [ ] **6 — Interaction.** Terrain collision and character movement.
 
 Shading is per-pixel in the fragment shader, injected into Three's standard

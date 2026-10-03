@@ -2,6 +2,7 @@ import GUI from 'lil-gui';
 import type { TerrainParams } from './heightmap';
 import type { TerrainShadingParams } from './TerrainMaterial';
 import type { WaterParams } from './Water';
+import type { ScatterParams } from './placement';
 
 /** Mutable holder so the dropdown and the keyboard shortcuts stay in sync. */
 export interface ModeRef {
@@ -36,6 +37,10 @@ export interface TerrainGuiOptions {
   water: WaterParams;
   waterEnabled: { on: boolean };
   onWaterChange: () => void;
+  /** Vegetation density and limits. Changing these replaces the props. */
+  scatter: ScatterParams;
+  scatterEnabled: { on: boolean };
+  onScatterChange: () => void;
 }
 
 /**
@@ -101,6 +106,17 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
   look.add(shading, 'blend', 0.001, 0.3, 0.005).name('band blend').onChange(s);
   look.add(shading, 'macroVariation', 0, 0.4, 0.01).name('colour variation').onChange(s);
 
+  // Scatter rebuilds geometry, so these fire on release rather than on drag.
+  const { scatter: sc, onScatterChange: os } = options;
+  const plants = gui.addFolder('Vegetation');
+  plants.add(options.scatterEnabled, 'on').name('enabled').onChange(os);
+  plants.add(sc, 'densityScale', 0, 2, 0.05).name('density').onFinishChange(os);
+  plants.add(sc.trees, 'density', 0, 60, 1).name('trees').onFinishChange(os);
+  plants.add(sc.trees, 'maxAltitude', 0, 1, 0.01).name('treeline').onFinishChange(os);
+  plants.add(sc.trees, 'maxSlope', 0.1, 1, 0.02).name('tree max slope').onFinishChange(os);
+  plants.add(sc.rocks, 'density', 0, 40, 1).name('rocks').onFinishChange(os);
+  plants.add(sc.shrubs, 'density', 0, 80, 1).name('shrubs').onFinishChange(os);
+
   const { water: w, onWaterChange: ow } = options;
   const sea = gui.addFolder('Water');
   sea.add(options.waterEnabled, 'on').name('enabled').onChange(ow);
@@ -123,6 +139,7 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
 
   detail.close();
   world.close();
+  plants.close();
   sea.close();
   light.close();
   display.close();

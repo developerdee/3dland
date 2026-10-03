@@ -28,6 +28,7 @@ It is written to be read in order. Each section builds on the previous one.
 11c. [Shading: slope, altitude, and injecting GLSL](#11c-shading-slope-altitude-and-injecting-glsl)
 11d. [Touch controls and input abstraction](#11d-touch-controls-and-input-abstraction)
 11e. [Water](#11e-water)
+11f. [Scatter: placing thousands of objects](#11f-scatter-placing-thousands-of-objects)
 12. [Where this goes next](#12-where-this-goes-next)
 13. [Glossary](#13-glossary)
 
@@ -1162,6 +1163,123 @@ isolation would have passed.
 
 ---
 
+## 11f. Scatter: placing thousands of objects
+
+Vegetation is what gives a landscape scale. Without it a hill could be ten
+metres or a hundred, and walking gives you no sense of covering ground.
+
+### Instancing, or: why 5,000 trees is cheap
+
+The naive approach — one `Mesh` per tree — fails at a few hundred objects. Not
+because of triangles, but because of **draw calls**: each mesh is a separate
+instruction to the GPU, each with its own state setup and CPU overhead. A
+thousand of those per frame will stall you well before the triangle count
+matters.
+
+`InstancedMesh` draws many copies of one geometry in a single call, each with
+its own transform matrix:
+
+```typescript
+const mesh = new THREE.InstancedMesh(geometry, material, count);
+matrix.compose(position, quaternion, scale);
+mesh.setMatrixAt(i, matrix);
+```
+
+Measured result: **5,434 objects in 8 draw calls** — one per prop variant. This
+is the single most important technique for populating a world, and it is why
+games can show forests at all.
+
+Two details that matter:
+
+- `setUsage(THREE.StaticDrawUsage)` tells the driver the matrices will not
+  change, so they are uploaded once rather than every frame.
+- `frustumCulled = false`, because the instances span the entire world. Three
+  culls on the *mesh's* bounding volume, which here encompasses everything — so
+  culling can only ever hide all of it or none, and testing it is wasted work.
+
+### Placement: why random is wrong
+
+Scattering by picking uniform random coordinates looks bad, and the reason is
+counterintuitive: **random points are not evenly spread**. You get thickets
+next to bare patches, because nothing stops two points landing on top of each
+other.
+
+The proper fix is Poisson-disc sampling, which guarantees a minimum spacing.
+The cheap approximation that gets you most of the way is a **jittered grid**:
+divide the area into cells, place one candidate at a random offset within each.
+
+```typescript
+const jx = 0.1 + random() * 0.8;   // inset, so neighbours cannot touch
+const x = -half + (gx + jx) * cellSize;
+```
+
+Measured nearest-neighbour distance: minimum 6 units, mean 15. Irregular
+enough to look unplanned, even enough to avoid clumping.
+
+### Rules, and probabilistic edges
+
+Each species has limits — altitude band, maximum slope, clearance above water.
+The important subtlety is how the edges behave. A hard cut-off at the treeline
+draws a visible contour line across the hillside, which is instantly
+artificial. So the limits are *probabilistic*:
+
+```typescript
+const lowEdge  = smoothstep(min - fade, min + fade, altitude);
+const highEdge = 1 - smoothstep(max - fade, max + fade, altitude);
+if (random() > lowEdge * highEdge * slopeFactor) continue;
+```
+
+Deep inside the band almost everything survives; near the edge the chance
+tapers. The treeline becomes a scattering of stragglers rather than a line.
+
+Rejection rather than adjustment, too. Nudging a tree off a cliff to the
+nearest valid spot sounds helpful and produces rows of trees along every cliff
+edge — a worse artefact than the gap it fixed.
+
+### Seeding per species
+
+Each species seeds its PRNG with the world seed *plus its own name*:
+
+```typescript
+mulberry32(hashSeed(`${seed}:${label}`))
+```
+
+Without that, all three species would draw from one stream, and changing tree
+density would reshuffle the rocks. Independent streams mean each slider affects
+only what it names — verified.
+
+### Procedural geometry, and merging for one draw call
+
+The props are built in code: cones stacked into conifers, offset spheres into
+crowns, a jittered sphere into a boulder. No assets to load, no download cost,
+and a new variant is a parameter rather than a file.
+
+The catch is that a tree has a brown trunk and green needles, and two materials
+would mean two draw calls per tree — defeating the instancing. So the parts are
+merged into one buffer with **colour baked into vertex attributes**, which
+needs index rebasing as parts are concatenated:
+
+```typescript
+indices[indexOffset + i] = source[i] + vertexOffset;
+```
+
+Each part's indices are local to itself; appending them into a shared buffer
+means every index shifts by however many vertices came before. Forget this and
+the geometry renders as spaghetti.
+
+### Density is a render budget, not an ecology
+
+The first pass produced **73,667 objects** — which is ecologically plausible for
+a square kilometre, and completely unusable. At ~45 triangles each that is 3.3
+million triangles on top of the terrain's own.
+
+Retuned to around 5,400 objects for ~250k triangles, which reads as open
+woodland rather than dense forest. The lesson is that "realistic" and
+"renderable" are different targets, and the constraint is almost always the
+budget rather than the biology.
+
+---
+
 ## 12. Where this goes next
 
 - [x] **1 — Scaffold.** Build tooling, render loop, CI deploy.
@@ -1169,7 +1287,8 @@ isolation would have passed.
 - [x] **3 — Camera.** Pointer-lock fly and walk modes.
 - [x] **4 — Shading.** Slope/altitude materials, gradient sky, tone mapping.
 - [x] **5a — Water.** Depth colour, waves, Fresnel, shore foam.
-- [ ] **5b — Chunking.** Terrain tiles with LOD, for an endless world.
+- [x] **5b — Scatter.** Instanced trees, rocks and shrubs, placed by rule.
+- [ ] **5c — Chunking.** Terrain tiles with LOD, for an endless world.
 - [ ] **6 — Interaction.** Collision and character movement.
 
 Two things worth previewing, both from stage 5 — the point where the current
@@ -1201,6 +1320,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **Delta time (`dt`)** | Seconds elapsed since the previous frame |
 | **Dependency** | External package your project uses |
 | **Dispose** | Explicitly free a GPU resource; not automatic |
+| **Draw call** | One instruction to the GPU; the real cost of many meshes |
 | **ES module** | Standard JavaScript `import`/`export` system |
 | **fBm** | Fractal Brownian motion — summed octaves of noise |
 | **Fragment shader** | GPU program computing one pixel's colour |
@@ -1213,6 +1333,8 @@ earlier becomes a real decision rather than a theoretical one.
 | **Lacunarity** | Frequency multiplier between successive octaves |
 | **LOD** | Level of detail — simpler geometry at distance |
 | **dvh** | Dynamic viewport height; tracks mobile browser chrome |
+| **Instancing** | Drawing many copies of one geometry in a single call |
+| **Jittered grid** | Even-ish random placement; cheap Poisson-disc stand-in |
 | **Lockfile** | Exact recorded versions of every installed package |
 | **Material** | How a surface responds to light |
 | **Mesh** | Geometry + material; a visible object |

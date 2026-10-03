@@ -17,6 +17,8 @@ import {
 import { TerrainMesh } from './terrain/TerrainMesh';
 import { defaultShading, type TerrainShadingParams } from './terrain/TerrainMaterial';
 import { Water, defaultWater, type WaterParams } from './terrain/Water';
+import { Scatter } from './terrain/Scatter';
+import { defaultScatter, type ScatterParams } from './terrain/placement';
 import { createTerrainGui } from './terrain/gui';
 import './style.css';
 
@@ -76,9 +78,31 @@ const quality = { level: initialQuality };
 const shading: TerrainShadingParams = { ...defaultShading };
 const water: WaterParams = { ...defaultWater };
 const waterEnabled = { on: true };
+// Vegetation density is the main render-cost dial after mesh detail, so touch
+// devices start lighter.
+/** Vegetation density per detail level, paired with the mesh resolutions. */
+const DENSITY_BY_QUALITY: Record<QualityLevel, number> = {
+  low: 0.45,
+  medium: 1,
+  high: 1.5,
+};
+
+const scatterParams: ScatterParams = {
+  ...defaultScatter,
+  densityScale: DENSITY_BY_QUALITY[initialQuality],
+};
+const scatterEnabled = { on: true };
 const terrain = new TerrainMesh(params);
 terrain.applyShading(shading);
 viewer.scene.add(terrain.group);
+
+// Declared before the rebuild helpers that assign them: `let` is not hoisted,
+// so assigning from a function called during startup would otherwise throw.
+let lastRebuildMs = 0;
+let lastScatterMs = 0;
+
+const scatter = new Scatter();
+viewer.scene.add(scatter.group);
 
 const sea = new Water();
 viewer.scene.add(sea.mesh);
@@ -93,6 +117,7 @@ viewer.onUpdate((_dt, elapsed) => sea.update(elapsed));
   sea.apply(water);
   sea.visible = waterEnabled.on;
   syncShoreline();
+  rebuildScatter();
 }
 
 // Sun azimuth/elevation are more intuitive to tune than a position vector.
@@ -188,6 +213,10 @@ function regenerate(): void {
   // re-derived against it.
   syncShoreline();
 
+  // Props are placed against the terrain and the waterline, so both must be
+  // settled before this runs.
+  rebuildScatter();
+
   // Terrain `size` may have changed, so the walkable area and the fly speed
   // that is scaled to it both move with it.
   fly.walkBounds = params.size / 2;
@@ -225,14 +254,24 @@ const gui = createTerrainGui({
   quality,
   onQualityChange: () => {
     params.resolution = QUALITY[quality.level];
+    // Vegetation is the other half of the render cost, so the detail control
+    // moves it too — otherwise dropping to low would still leave thousands of
+    // props to draw.
+    scatterParams.densityScale = DENSITY_BY_QUALITY[quality.level];
     regenerate();
+    gui.controllersRecursive().forEach((c) => c.updateDisplay());
   },
+  scatter: scatterParams,
+  scatterEnabled,
+  onScatterChange: rebuildScatter,
   water,
   waterEnabled,
   onWaterChange: () => {
     sea.visible = waterEnabled.on;
     sea.apply(water);
     syncShoreline();
+    // Props avoid the water, so moving sea level must replace them.
+    rebuildScatter();
     // Sea level moves the walking surface, so a walker standing in the
     // shallows must be lifted or dropped to match.
     if (cameraModes.mode === 'walk') {
@@ -248,6 +287,26 @@ const gui = createTerrainGui({
     );
   },
 });
+
+/**
+ * Replaces the vegetation. Placement depends on the terrain *and* the
+ * waterline, so this must run after both are settled.
+ */
+function rebuildScatter(): void {
+  const started = performance.now();
+  scatter.rebuild(
+    {
+      map: terrain.heightmap,
+      waterLevel: sea.visible ? sea.surfaceY : null,
+      // Shares the terrain's seed, so a world's vegetation is as reproducible
+      // as its landscape.
+      seed: params.seed,
+    },
+    scatterParams,
+  );
+  scatter.visible = scatterEnabled.on;
+  lastScatterMs = performance.now() - started;
+}
 
 /**
  * Puts the sand band just above the waterline.
@@ -402,7 +461,6 @@ setMode('walk');
 
 // --- HUD: FPS and terrain stats ---
 
-let lastRebuildMs = 0;
 let framesSinceSample = 0;
 let timeSinceSample = 0;
 
@@ -420,10 +478,13 @@ viewer.onUpdate((dt) => {
   const depth = sea.visible ? sea.surfaceY - ground : 0;
   const depthLabel = depth > 0.05 ? ` · depth ${depth.toFixed(1)}` : '';
 
+  const props = scatter.visible ? ` · ${scatter.instanceCount.toLocaleString()} props` : '';
+
   hud.textContent =
-    `${fps} fps · ${tris} tris · ${cameraModes.mode} · ` +
+    `${fps} fps · ${tris} tris${props} · ${cameraModes.mode} · ` +
     `x ${p.x.toFixed(0)} y ${p.y.toFixed(1)} z ${p.z.toFixed(0)} · ` +
-    `ground ${ground.toFixed(1)}${depthLabel} · rebuild ${lastRebuildMs.toFixed(1)} ms`;
+    `ground ${ground.toFixed(1)}${depthLabel} · ` +
+    `rebuild ${lastRebuildMs.toFixed(0)}+${lastScatterMs.toFixed(0)} ms`;
 
   framesSinceSample = 0;
   timeSinceSample = 0;
