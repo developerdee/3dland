@@ -26,6 +26,11 @@ export interface TerrainGuiOptions {
   /** Sun azimuth and elevation, in degrees. */
   sun: { azimuth: number; elevation: number };
   onSunChange: () => void;
+  /** Mesh density preset. Changing it rebuilds the terrain. */
+  quality: { level: 'low' | 'medium' | 'high' };
+  onQualityChange: () => void;
+  /** Copies a shareable URL pinning the current seed. */
+  onShareSeed: () => void;
 }
 
 /**
@@ -46,6 +51,13 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
   const gui = new GUI({ title: '3dland' });
 
   const view = { wireframe: false };
+
+  // Quality first: it is the control most likely to be wanted, especially on
+  // a phone where the default is deliberately conservative.
+  gui
+    .add(options.quality, 'level', ['low', 'medium', 'high'])
+    .name('detail')
+    .onChange(options.onQualityChange);
 
   const camera = gui.addFolder('Camera');
   camera
@@ -68,12 +80,9 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
 
   const world = gui.addFolder('World');
   world.add(params, 'seed').name('seed').onFinishChange(onChange);
-  world.add({ randomize: onRandomSeed }, 'randomize').name('random seed');
-  world.add(params, 'size', 50, 500, 10).name('size (units)').onFinishChange(onChange);
-  world
-    .add(params, 'resolution', [64, 128, 256, 512])
-    .name('resolution')
-    .onChange(onChange);
+  world.add({ randomize: onRandomSeed }, 'randomize').name('new world');
+  world.add({ share: options.onShareSeed }, 'share').name('copy link to world');
+  world.add(params, 'size', 200, 2000, 50).name('size (units)').onFinishChange(onChange);
 
   // Shading is uniform-only, so these fire on every drag frame rather than on
   // release — the feedback is immediate and costs nothing.

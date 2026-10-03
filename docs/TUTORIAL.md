@@ -26,6 +26,7 @@ It is written to be read in order. Each section builds on the previous one.
 11a. [How the terrain actually works](#11a-how-the-terrain-actually-works)
 11b. [First-person camera control](#11b-first-person-camera-control)
 11c. [Shading: slope, altitude, and injecting GLSL](#11c-shading-slope-altitude-and-injecting-glsl)
+11d. [Touch controls and input abstraction](#11d-touch-controls-and-input-abstraction)
 12. [Where this goes next](#12-where-this-goes-next)
 13. [Glossary](#13-glossary)
 
@@ -943,6 +944,112 @@ stage — one line.
 
 ---
 
+## 11d. Touch controls and input abstraction
+
+Pointer lock and WASD are desktop-only; on a phone there was no way to move at
+all. Stage 4b added on-screen twin sticks.
+
+### Why the controller reports intent, not camera changes
+
+The naive fix is to make the touch handlers move the camera directly. That
+gives you two independent movement implementations to keep in sync, and they
+fight on a hybrid device like an iPad with a keyboard.
+
+Instead `TouchControls` owns no camera state. It reports plain numbers —
+"strafe 0.4, forward 1.0, climbing, boosting" — and `FlyControls` sums them
+with whatever the keyboard contributed:
+
+```typescript
+strafe  += this.externalMove.x;
+advance += this.externalMove.y;
+climb   += this.externalMove.z;
+```
+
+One movement implementation, two input sources, no conflict.
+
+### Clamping, not normalising
+
+Stage 3 normalised the movement vector so diagonal keyboard input wasn't 41%
+faster than cardinal. That is exactly wrong for an analog stick: normalising a
+half-deflected dial snaps it to full speed, destroying the gradation that makes
+a touch stick usable.
+
+```typescript
+const planar = Math.hypot(strafe, advance);
+if (planar > 1) { strafe /= planar; advance /= planar; }
+```
+
+Clamping keeps partial input partial while still capping the diagonal. A
+half-tilt now walks and a full tilt sprints — verified: 0.5 on the dial gives
+exactly half speed.
+
+### Pointer events, and the stuck-key problem
+
+Touch uses **Pointer Events** rather than touch events — one API covering
+mouse, touch and stylus, with each contact assigned a `pointerId`. Tracking
+those ids is what makes genuine two-thumb control work: the dial ignores
+events whose id isn't the one that grabbed it, so a second finger on the look
+area can't hijack movement.
+
+The trap is the same one from stage 3, in a new guise. A finger sliding off a
+hold-to-move button never fires `pointerup`, leaving the button stuck down and
+the camera climbing forever. Three handlers are needed, not one:
+
+```typescript
+button.addEventListener('pointerup', release);
+button.addEventListener('pointercancel', release);        // system interruption
+button.addEventListener('lostpointercapture', release);   // slid off
+```
+
+Any held-input control needs all three. This is the single most common bug in
+hand-rolled touch controls.
+
+### Accumulating look deltas
+
+Several `pointermove` events can arrive between two frames. Assigning the
+delta keeps only the last one and discards the rest, which feels like the
+camera dropping input:
+
+```typescript
+this.state.lookDX += e.clientX - this.lookLast.x;   // += not =
+```
+
+`consume()` then returns the total and resets it, so each frame gets exactly
+the motion since the previous frame.
+
+### The CSS that actually matters
+
+Four declarations do most of the work, and omitting any one breaks touch:
+
+| Declaration | Without it |
+| --- | --- |
+| `touch-action: none` | The browser scrolls or zooms instead of steering |
+| `user-scalable=no` | Pinch-zooms the page, fighting the sticks |
+| `overscroll-behavior: none` | iOS rubber-banding drags the whole page |
+| `env(safe-area-inset-*)` | Controls sit under the notch or home bar |
+
+Also `height: 100dvh` rather than `100vh`: dynamic viewport units track mobile
+browser chrome appearing and disappearing, where `vh` leaves a gap when the
+address bar hides.
+
+### Sizing the world for walking
+
+Scaling the world to 1000 units exposed a tuning problem the numbers caught
+before any of it was visible. At amplitude 130, **17% of the surface was
+steeper than 45°**, with peaks at 81° — fine to fly over, miserable to walk.
+
+Sweeping the parameters found amplitude 90 / frequency 1.1: still 90 units of
+relief, but only 2.7% of the ground too steep to walk. The lesson is that
+"looks dramatic" and "is traversable" are different objectives, and the second
+one is measurable.
+
+Speeds then needed splitting per mode. A single value cannot serve both: 6.5
+units/second makes a 1000-unit world a two-minute walk, while flying wants
+~85, scaled as a fraction of world size so resizing keeps crossing times
+constant.
+
+---
+
 ## 12. Where this goes next
 
 - [x] **1 — Scaffold.** Build tooling, render loop, CI deploy.
@@ -991,6 +1098,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **HMR** | Hot module replacement — live code swap without reload |
 | **Lacunarity** | Frequency multiplier between successive octaves |
 | **LOD** | Level of detail — simpler geometry at distance |
+| **dvh** | Dynamic viewport height; tracks mobile browser chrome |
 | **Lockfile** | Exact recorded versions of every installed package |
 | **Material** | How a surface responds to light |
 | **Mesh** | Geometry + material; a visible object |
@@ -1000,6 +1108,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **npm** | JavaScript package registry and CLI |
 | **Octave** | One layer of noise at a given frequency/amplitude |
 | **Persistence** | Amplitude multiplier between successive octaves |
+| **Pointer events** | Unified API for mouse, touch and stylus input |
 | **Pointer lock** | Browser API giving relative mouse motion, cursor hidden |
 | **PRNG** | Pseudo-random number generator; seedable, repeatable |
 | **Roll** | Rotation about the view axis; tilting the horizon |

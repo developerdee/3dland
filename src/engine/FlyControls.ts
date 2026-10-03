@@ -50,6 +50,10 @@ export class FlyControls {
   private pitch = 0;
   private readonly keys = new Set<string>();
 
+  /** Intent from on-screen controls, summed with the keyboard's. */
+  private readonly externalMove = new THREE.Vector3();
+  private externalBoost = false;
+
   // Reused each frame: allocating vectors inside the render loop generates
   // garbage 60 times a second, and GC pauses show up as stutter.
   private readonly forward = new THREE.Vector3();
@@ -74,16 +78,7 @@ export class FlyControls {
 
     this.onPointerMove = (e) => {
       if (!this.isLocked) return;
-
-      this.yaw -= e.movementX * this.lookSensitivity;
-      this.pitch -= e.movementY * this.lookSensitivity;
-
-      // Clamp just short of straight up/down. At exactly +/-90 degrees the
-      // forward vector becomes parallel to world up and yaw loses meaning.
-      const limit = Math.PI / 2 - 0.001;
-      this.pitch = Math.min(Math.max(this.pitch, -limit), limit);
-
-      this.applyRotation();
+      this.applyLookDelta(e.movementX, e.movementY);
     };
 
     this.onPointerLockChange = () => {
@@ -121,6 +116,30 @@ export class FlyControls {
     return document.pointerLockElement === this.domElement;
   }
 
+  /**
+   * Feeds movement intent from a source other than the keyboard — the touch
+   * dial. Additive with keys, so a hybrid device can use either.
+   *
+   * `x` strafes, `y` moves forward, `vertical` climbs; each in [-1, 1].
+   */
+  setExternalMove(x: number, y: number, vertical: number, boost: boolean): void {
+    this.externalMove.set(x, y, vertical);
+    this.externalBoost = boost;
+  }
+
+  /** Applies a look delta in pixels, as the mouse would while locked. */
+  applyLookDelta(dx: number, dy: number): void {
+    if (dx === 0 && dy === 0) return;
+
+    this.yaw -= dx * this.lookSensitivity;
+    this.pitch -= dy * this.lookSensitivity;
+
+    const limit = Math.PI / 2 - 0.001;
+    this.pitch = Math.min(Math.max(this.pitch, -limit), limit);
+
+    this.applyRotation();
+  }
+
   /** Adopts the camera's current orientation, so toggling modes doesn't jump. */
   syncFromCamera(): void {
     this.euler.setFromQuaternion(this.camera.quaternion, 'YXZ');
@@ -144,29 +163,60 @@ export class FlyControls {
     this.camera.getWorldDirection(this.forward);
     this.right.crossVectors(this.forward, THREE.Object3D.DEFAULT_UP).normalize();
 
-    this.motion.set(0, 0, 0);
+    // Keyboard intent in local axes: strafe, forward, climb. Collected as
+    // scalars first so the keyboard's on/off input and the dial's analog
+    // input can be combined before being turned into a world-space vector.
+    let strafe = 0;
+    let advance = 0;
+    let climb = 0;
 
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) this.motion.add(this.forward);
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) this.motion.sub(this.forward);
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) this.motion.add(this.right);
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) this.motion.sub(this.right);
+    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) advance += 1;
+    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) advance -= 1;
+    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) strafe += 1;
+    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) strafe -= 1;
+    if (this.keys.has('Space')) climb += 1;
+    if (this.keys.has('KeyC') || this.keys.has('ControlLeft')) climb -= 1;
+
+    strafe += this.externalMove.x;
+    advance += this.externalMove.y;
+    climb += this.externalMove.z;
 
     const walking = this.groundOffset !== null;
 
+    // Clamp the horizontal pair to unit length rather than normalising it.
+    // Normalising would snap a half-deflected dial to full speed, throwing
+    // away the analog range that makes a touch stick usable; clamping keeps
+    // partial input partial while still stopping diagonal keyboard movement
+    // from being 41% faster than cardinal.
+    const planar = Math.hypot(strafe, advance);
+    if (planar > 1) {
+      strafe /= planar;
+      advance /= planar;
+    }
+
+    this.motion.set(0, 0, 0);
+    this.motion.addScaledVector(this.forward, advance);
+    this.motion.addScaledVector(this.right, strafe);
+
     if (walking) {
       // On foot, looking up must not slow you down, so discard the vertical
-      // component and renormalise.
+      // component the look direction contributes.
       this.motion.y = 0;
+      // Renormalise to the intended planar magnitude: dropping y from a
+      // pitched forward vector shortens it, which would otherwise make you
+      // walk slower the further you look up or down.
+      const length = Math.hypot(this.motion.x, this.motion.z);
+      if (length > 1e-6) {
+        const target = Math.min(Math.hypot(strafe, advance), 1);
+        this.motion.multiplyScalar(target / length);
+      }
     } else {
-      if (this.keys.has('Space')) this.motion.y += 1;
-      if (this.keys.has('KeyC') || this.keys.has('ControlLeft')) this.motion.y -= 1;
+      this.motion.y += Math.min(Math.max(climb, -1), 1);
     }
 
     if (this.motion.lengthSq() > 0) {
-      // Normalise so diagonal movement isn't faster than cardinal.
-      this.motion.normalize();
-
-      const boost = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+      const boost =
+        this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.externalBoost;
       this.motion.multiplyScalar(this.speed * (boost ? this.boostMultiplier : 1) * step);
       this.camera.position.add(this.motion);
     }

@@ -13,12 +13,21 @@ body {
   height: 100%;
   overflow: hidden;
   background: #0b0d12;
+  /* Stop iOS rubber-band scrolling and pull-to-refresh, which otherwise drag
+     the whole page while the user is trying to steer. */
+  overscroll-behavior: none;
+  position: fixed;
+  inset: 0;
 }
 
 #scene {
   display: block;
   width: 100vw;
-  height: 100vh;
+  /* dvh tracks mobile browser chrome appearing and disappearing; vh does not,
+     and leaves a gap when the address bar hides. */
+  height: 100dvh;
+  /* Gestures on the canvas are ours, not the browser's. */
+  touch-action: none;
 }
 
 #hud {
@@ -88,4 +97,200 @@ body:has(#hint.hidden)::after {
 /* Keep lil-gui's panel clear of the HUD. */
 .lil-gui.root {
   --width: 300px;
+}
+
+/* --- Shared button styling --- */
+
+.tc-btn {
+  appearance: none;
+  border: 1px solid rgb(255 255 255 / 0.22);
+  border-radius: 10px;
+  background: rgb(14 18 26 / 0.62);
+  color: #e8edf5;
+  font: 600 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Stops the browser treating taps as gestures: no double-tap zoom, no
+     text selection, no 300ms click delay, no long-press context menu. */
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+
+.tc-btn.active {
+  border-color: rgb(159 208 255 / 0.85);
+  background: rgb(52 104 170 / 0.78);
+}
+
+/* --- Mode buttons --- */
+
+#mode-buttons {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  gap: 6px;
+  z-index: 10;
+}
+
+.mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 13px;
+  backdrop-filter: blur(6px);
+}
+
+.mode-btn kbd {
+  padding: 1px 4px;
+  border: 1px solid rgb(255 255 255 / 0.25);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+/* The keyboard hint is noise on a device without one. */
+@media (pointer: coarse) {
+  .mode-btn kbd {
+    display: none;
+  }
+
+  .mode-btn {
+    padding: 11px 15px;
+  }
+}
+
+/* --- Touch controls --- */
+
+#touch-controls {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  /* The container must not eat events meant for the canvas; only its
+     children opt back in. */
+  pointer-events: none;
+  touch-action: none;
+}
+
+#touch-controls.hidden,
+#touch-controls .tc-vertical.hidden {
+  display: none;
+}
+
+/* Look area: everything except where the dial and panel sit, so a drag
+   anywhere on the open view turns the camera. */
+.tc-look {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+}
+
+.tc-look-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgb(255 255 255 / 0.22);
+  font: 12px/1 system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.tc-look.active .tc-look-hint {
+  opacity: 0;
+}
+
+/* Movement dial, bottom-left under the thumb. */
+.tc-dial {
+  position: absolute;
+  bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+  left: calc(22px + env(safe-area-inset-left, 0px));
+  width: 116px;
+  height: 116px;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgb(14 18 26 / 0.5) 0%,
+    rgb(14 18 26 / 0.34) 70%,
+    rgb(14 18 26 / 0.2) 100%
+  );
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.tc-dial.active {
+  border-color: rgb(159 208 255 / 0.6);
+}
+
+.tc-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 52px;
+  height: 52px;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgb(216 229 245 / 0.82);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.4);
+  pointer-events: none;
+}
+
+/* Direction ticks: positioned by rotate+translate from the centre. */
+.tc-tick {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 7px;
+  margin: -3.5px 0 0 -1px;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.3);
+  transform-origin: 50% 50%;
+  pointer-events: none;
+}
+
+/* Ascend/descend, bottom-right. */
+.tc-vertical {
+  position: absolute;
+  right: calc(22px + env(safe-area-inset-right, 0px));
+  bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.tc-vbtn {
+  width: 60px;
+  height: 52px;
+  border-radius: 12px;
+  font-size: 15px;
+  backdrop-filter: blur(4px);
+  touch-action: none;
+}
+
+/* On a phone the GUI panel is enormous relative to the screen; shrink it and
+   let it collapse out of the way. */
+@media (max-width: 680px) {
+  .lil-gui.root {
+    --width: 232px;
+    font-size: 11px;
+  }
+
+  #hud {
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    left: 8px;
+    max-width: calc(100vw - 16px);
+    font-size: 10px;
+  }
+
+  #hint {
+    bottom: 160px;
+    font-size: 12px;
+  }
 }

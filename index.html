@@ -2,7 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- user-scalable=no stops pinch-zooming the page itself, which otherwise
+         fights the twin-stick drags. viewport-fit=cover lets the canvas reach
+         under a notch, with safe-area insets keeping the controls clear. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#8fb8e8" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <title>3dland</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>

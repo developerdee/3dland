@@ -114,27 +114,43 @@ site while working fine in dev.
 
 ## Using it
 
-Three camera modes, switched with the keyboard or the panel:
+A new random world each time you load. Three modes, switchable by the buttons
+top-left or the keyboard:
 
-| Key | Mode | Controls |
+| Mode | What it's for |
+| --- | --- |
+| **Walk** | Held at eye height over the terrain. The default, and the point |
+| **Fly** | Free movement in all three axes, for covering ground |
+| **Overview** | Orbit the whole terrain. For inspecting and tuning it |
+
+**On desktop:** click to capture the mouse, then WASD to move, mouse to look,
+Space/C for vertical in fly mode, Shift to boost. <kbd>Esc</kbd> releases the
+pointer. <kbd>G</kbd> / <kbd>F</kbd> / <kbd>O</kbd> switch modes.
+
+**On touch:** a dial bottom-left moves you — it's analog, so a half-tilt walks
+and a full tilt sprints. Drag anywhere else to look around. Two buttons
+bottom-right climb and descend when flying. Both thumbs work at once.
+
+The **detail** control at the top of the panel trades triangles for frame rate:
+
+| Level | Mesh | Triangles |
 | --- | --- | --- |
-| <kbd>O</kbd> | **orbit** | Drag to turn, scroll to zoom, right-drag to pan |
-| <kbd>F</kbd> | **fly** | Click to look · WASD · Space up, C down · Shift boost |
-| <kbd>G</kbd> | **walk** | As fly, but held at eye height over the terrain |
+| low | 128² | 32k |
+| medium | 256² | 130k |
+| high | 512² | 523k |
 
-Fly and walk use pointer lock, so **click the canvas** to capture the mouse;
-<kbd>Esc</kbd> releases it. Walk mode is clamped to the terrain edge, since
-height lookups flatten outside it. Orbit is best for tuning terrain, walk for
-judging whether it actually reads as landscape — hills that look dramatic from
-above are often gentle swells at eye level.
+Touch devices default to low, desktop to medium. The world is the same size at
+every level — only the density changes.
 
-The panel top-right tunes terrain, shading, sun angle and camera speed live.
-Shading and sun changes are uniform-only, so they apply instantly without
-regenerating the terrain. The readout
-bottom-left shows FPS, triangle count, current mode, camera position, ground
-height beneath you, and the last rebuild time.
+The panel also tunes terrain shape, shading, sun angle and camera speed. Shading
+and sun are uniform-only, so they apply instantly; terrain shape triggers a
+rebuild (14ms at low, 190ms at high).
 
-The parameters worth understanding:
+**New world** rerolls the seed. **Copy link to world** gives you a URL with
+`?seed=` pinned, so a world worth keeping can be bookmarked or shared — and a
+bug can be reproduced on the exact terrain that caused it.
+
+### Terrain parameters
 
 | Parameter | Effect |
 | --- | --- |
@@ -145,9 +161,15 @@ The parameters worth understanding:
 | `octaves` | Noise layers summed. More detail, more time |
 | `persistence` | How fast octaves fade. Low is smooth, high is rough |
 | `lacunarity` | How fast octaves get finer. ~2 is conventional |
+| `size` | World extent in units. Fly speed scales with it |
 | `seed` | Any string. The same seed always rebuilds the same world |
 
-And the shading controls:
+The defaults are tuned together: 90 units of relief over a 1000-unit world
+reads as dramatic while keeping under 3% of the surface steeper than 45°, so
+walking works nearly everywhere. Pushing amplitude or frequency much higher
+makes it alpine and unpleasant on foot.
+
+### Shading parameters
 
 | Parameter | Effect |
 | --- | --- |
@@ -158,13 +180,9 @@ And the shading controls:
 | `colour variation` | Noise that breaks up flat colour |
 | `azimuth` / `elevation` | Sun direction, in degrees |
 
-Slope is the input altitude alone cannot give you: a cliff and a meadow at the
-same height should not look alike. It comes from the surface normals, read
-per-pixel in the fragment shader.
-
-`seed` is why the terrain is reproducible: a hill that reveals a bug can be
-returned to exactly. `Math.random()` cannot do that, so `src/terrain/random.ts`
-implements a seeded PRNG instead.
+Slope is the input altitude cannot give you: a cliff and a meadow at the same
+height should not look alike. It comes from the surface normals, read per-pixel
+in the fragment shader.
 
 ## Layout
 
@@ -174,6 +192,8 @@ src/main.ts                 scene assembly and entry point
 src/engine/Viewer.ts        renderer, camera, resize handling, render loop
 src/engine/FlyControls.ts   pointer-lock mouse look, WASD, ground following
 src/engine/CameraModes.ts   orbit/fly/walk switching, kept continuous
+src/engine/TouchControls.ts on-screen twin sticks for touch devices
+src/engine/ModeButtons.ts   on-screen mode switcher
 src/engine/Sky.ts           gradient sky dome, follows the camera
 src/terrain/heightmap.ts    noise -> heights (the generation maths)
 src/terrain/TerrainMesh.ts  heights -> renderable geometry
