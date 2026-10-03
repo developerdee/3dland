@@ -112,16 +112,43 @@ Pages serves project sites from a subdirectory. If you fork under a different
 repo name, change it to match, or built asset URLs will 404 on the deployed
 site while working fine in dev.
 
+## Using it
+
+Drag to orbit, scroll to zoom, right-drag to pan. The panel top-right tunes the
+terrain live; the readout bottom-left shows FPS, triangle count, height range
+and how long the last rebuild took.
+
+The parameters worth understanding:
+
+| Parameter | Effect |
+| --- | --- |
+| `amplitude` | Total height, in world units, peak to trough |
+| `frequency` | Feature size — low is broad continents, high is busy hills |
+| `exponent` | Above 1 flattens low ground and keeps peaks sharp |
+| `ridged` | Folds troughs upward into sharp crests; mountainous |
+| `octaves` | Noise layers summed. More detail, more time |
+| `persistence` | How fast octaves fade. Low is smooth, high is rough |
+| `lacunarity` | How fast octaves get finer. ~2 is conventional |
+| `seed` | Any string. The same seed always rebuilds the same world |
+
+`seed` is why the terrain is reproducible: a hill that reveals a bug can be
+returned to exactly. `Math.random()` cannot do that, so `src/terrain/random.ts`
+implements a seeded PRNG instead.
+
 ## Layout
 
 ```
-index.html             page shell: canvas and HUD
-src/main.ts            scene assembly and entry point
-src/engine/Viewer.ts   renderer, camera, resize handling, render loop
-src/style.css          page and HUD styling
-docs/TUTORIAL.md       stack explainer for newcomers to 3D/JS tooling
-vite.config.ts         dev vs. production base path, build options
-tsconfig.json          strict TypeScript settings
+index.html                  page shell: canvas and HUD
+src/main.ts                 scene assembly and entry point
+src/engine/Viewer.ts        renderer, camera, resize handling, render loop
+src/terrain/heightmap.ts    noise -> heights (the generation maths)
+src/terrain/TerrainMesh.ts  heights -> renderable geometry
+src/terrain/random.ts       seeded PRNG, for reproducible worlds
+src/terrain/gui.ts          lil-gui parameter panel
+src/style.css               page and HUD styling
+docs/TUTORIAL.md            stack explainer for newcomers to 3D/JS tooling
+vite.config.ts              dev vs. production base path, build options
+tsconfig.json               strict TypeScript settings
 ```
 
 `Viewer` owns the plumbing every stage needs. Feature code touches it through
@@ -135,11 +162,12 @@ The intent is that stages 2 onward add modules without modifying `Viewer`.
 ## Stages
 
 - [x] **1 — Scaffold.** Vite + TS + Three, render loop, FPS readout, CI deploy.
-- [ ] **2 — Terrain.** Heightmap from seeded noise, with a debug GUI for params.
-- [ ] **3 — Camera.** Orbit controls, then first-person / fly navigation.
+- [x] **2 — Terrain.** Seeded fBm heightmap, vertex colours, debug GUI, orbit
+      controls, sky and fog.
+- [ ] **3 — Camera.** First-person / fly navigation (orbit landed in stage 2).
 - [ ] **4 — Shading.** Slope- and altitude-based materials, lighting, sky, fog.
 - [ ] **5 — Scale.** Water plane; chunked terrain with LOD for large worlds.
 - [ ] **6 — Interaction.** Terrain collision and character movement.
 
-Everything in the current scene except the FPS counter is placeholder, and gets
-replaced in stage 2.
+The altitude-banded vertex colours are a placeholder so relief is legible;
+stage 4 replaces them with slope- and altitude-aware shading.

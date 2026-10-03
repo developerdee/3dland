@@ -23,6 +23,7 @@ It is written to be read in order. Each section builds on the previous one.
 9. [Reading our actual code](#9-reading-our-actual-code)
 10. [Deployment: CI and GitHub Pages](#10-deployment-ci-and-github-pages)
 11. [The dev server lifecycle](#11-the-dev-server-lifecycle)
+11a. [How the terrain actually works](#11a-how-the-terrain-actually-works)
 12. [Where this goes next](#12-where-this-goes-next)
 13. [Glossary](#13-glossary)
 
@@ -628,40 +629,131 @@ looking alive doesn't mean the server is. Reload to find out.
 
 ---
 
+## 11a. How the terrain actually works
+
+Stage 2 is built, so here is what it does.
+
+### Seeded randomness, and why `Math.random()` won't do
+
+`Math.random()` cannot be seeded. Every reload would give a different world, so
+a hill that reveals a bug could never be revisited — which makes debugging
+nearly impossible.
+
+So `src/terrain/random.ts` implements **mulberry32**, a small PRNG with 32 bits
+of state. Give it the same seed, get the same sequence. `hashSeed` turns a
+string into that seed, so worlds can be named (`'landfall'`) rather than
+numbered.
+
+### Fractal Brownian motion
+
+One layer of simplex noise is too smooth to read as landscape — it looks like
+rolling fabric. Real terrain is **self-similar**: mountains have hills on them,
+hills have rocks, rocks have texture. You get that by summing several layers:
+
+```
+octave 1:  amplitude 1.00, frequency 1x   →  continental shapes
+octave 2:  amplitude 0.50, frequency 2x   →  hills
+octave 3:  amplitude 0.25, frequency 4x   →  rocks
+octave 4:  amplitude 0.12, frequency 8x   →  texture
+                                   summed →  landscape
+```
+
+Each octave is half the height and twice the detail of the last. Two parameters
+control that: **persistence** (the amplitude multiplier, 0.5 above) and
+**lacunarity** (the frequency multiplier, 2). This is the standard recipe, and
+it's remarkable how convincing it is for how simple it is.
+
+### Two bugs worth knowing about
+
+Both of these were caught by checking the generated numbers rather than by
+looking at the screen — which is exactly why it's worth doing.
+
+**Bug 1: simplex noise is exactly zero at the origin.** This is inherent to how
+the algorithm works — lattice origins evaluate to 0. Since the heightmap was
+sampled on a window centred at (0, 0), the middle of every map was pinned to
+height zero. Worse, *every octave* shared that origin, so their contributions
+were correlated rather than independent.
+
+The fix: offset each octave by a seeded random amount, so they sample different
+parts of the noise field.
+
+**Bug 2: the sampling window was far too small.** At frequency 1.1 the code
+traversed only ±0.55 units of noise space. Simplex features are about one unit
+across, so that window never encountered enough of the field to reach its
+extremes — measured output spanned ±0.80 instead of ±1.0, giving flat,
+lopsided terrain. The fix was a `FIELD_SPAN` constant scaling the window to
+something useful.
+
+The general lesson: both bugs produced *plausible-looking* output. Terrain that
+is flatter than intended still looks like terrain. Only measuring the numbers
+revealed it.
+
+### Why `normalizeRange` exists
+
+Even correct fBm reaches only ~64% of its nominal amplitude, because summed
+octaves rarely peak simultaneously — they partly cancel. So an `amplitude` of
+28 produced terrain spanning 18 units, which makes the slider a lie.
+
+`normalizeRange` rescales the finished heightmap to span exactly `amplitude`.
+The tradeoff, which is why it's a toggle rather than always-on: it couples the
+output range to whatever extremes that particular seed happened to hit, so two
+seeds get the same total height even if one is intrinsically more dramatic.
+
+### From heights to geometry
+
+`TerrainMesh` turns the number grid into something renderable:
+
+1. Build a `PlaneGeometry` subdivided into `resolution - 1` segments per side.
+2. Rotate it flat — planes are created standing up in the XY plane.
+3. Write each height into the corresponding vertex's **y** coordinate.
+4. Assign a colour per vertex by altitude band, so relief is visible.
+5. Call `computeVertexNormals()`.
+
+Step 5 **must** come after step 3. Normals describe which way a surface faces,
+and lighting depends on them entirely. Compute them before moving the vertices
+and you get the normals of a flat plane — every triangle facing straight up,
+terrain lit as though it were a billiard table.
+
+One convenient accident: `PlaneGeometry`'s vertex order matches a row-major
+heightmap exactly, since both iterate x fastest. So vertex *i* corresponds to
+height *i*, with no coordinate mapping needed.
+
+### Disposal, and why it matters
+
+GPU resources are **not** garbage collected. Allocate a geometry, drop your
+last reference, and the VRAM stays allocated until the WebGL context dies. Since
+every GUI change rebuilds the terrain, that would leak a few megabytes per
+slider nudge — so `TerrainMesh.rebuild()` explicitly calls `.dispose()` on the
+old geometry first. Any time you replace a geometry, material or texture in
+Three.js, dispose the old one.
+
+---
+
 ## 12. Where this goes next
 
 - [x] **1 — Scaffold.** Build tooling, render loop, CI deploy.
-- [ ] **2 — Terrain.** Heightmap from seeded noise, plus a debug GUI.
-- [ ] **3 — Camera.** Orbit controls, then first-person / fly.
+- [x] **2 — Terrain.** Seeded fBm heightmap, debug GUI, orbit controls, fog.
+- [ ] **3 — Camera.** First-person / fly navigation.
 - [ ] **4 — Shading.** Slope- and altitude-based materials, sky, fog.
 - [ ] **5 — Scale.** Water; chunked terrain with LOD.
 - [ ] **6 — Interaction.** Collision and character movement.
 
-Two concepts arriving in stage 2 that are worth previewing.
+Two things worth previewing, both from stage 5 — the point where the current
+single-mesh approach stops scaling.
 
-**Seeded noise.** `Math.random()` is useless for terrain: you'd get a different
-world on every reload, and spiky noise rather than landscape. Instead we use
-**simplex noise** — a function mapping coordinates to a smooth pseudo-random
-value, where nearby inputs give nearby outputs. That smoothness is what makes
-it read as terrain rather than static. It's *seeded*, so the same seed always
-reproduces the same world, which matters enormously for debugging: you can
-return to the exact hill that broke something.
+**Chunking and LOD.** Right now the terrain is one mesh at a fixed resolution.
+At 512x512 that's half a million triangles for a 200-unit square, and a larger
+world at the same detail would be unusable. The standard answer is to split the
+terrain into chunks, generate them around the viewer, and render distant chunks
+at lower resolution — a hill 400 units away doesn't need per-metre detail. The
+hard part is the seams where differing resolutions meet.
 
-Real terrain layers several octaves — a large-amplitude low-frequency pass for
-mountains, then progressively smaller and finer passes for hills and bumps:
-
-```
-amplitude 1.0, frequency 1   →  continental shapes
-amplitude 0.5, frequency 2   →  hills
-amplitude 0.25, frequency 4  →  rocks and texture
-                summed       →  convincing landscape
-```
-
-**The debug GUI.** We'll add `lil-gui`, which puts sliders on screen for your
-parameters. Tuning terrain means trying values, and recompiling to change a
-constant from 0.5 to 0.6 is intolerable when the right answer is found by
-feel. Sliders plus hot reload turn an hour of guessing into five minutes of
-play.
+**Water.** Deceptively involved. A flat blue plane at a fixed height is twenty
+minutes' work and looks like a flat blue plane. Convincing water needs a moving
+normal map for ripples, reflection, refraction through the surface, and depth-
+based colour so shallows differ from deep. It's the first stage where custom
+shaders become unavoidable — and so the point where the WebGPU question from
+earlier becomes a real decision rather than a theoretical one.
 
 ---
 
@@ -673,18 +765,26 @@ play.
 | **CI** | Continuous integration — automated builds on push |
 | **Delta time (`dt`)** | Seconds elapsed since the previous frame |
 | **Dependency** | External package your project uses |
+| **Dispose** | Explicitly free a GPU resource; not automatic |
 | **ES module** | Standard JavaScript `import`/`export` system |
+| **fBm** | Fractal Brownian motion — summed octaves of noise |
 | **Fragment shader** | GPU program computing one pixel's colour |
 | **Frustum** | The truncated pyramid of space a camera can see |
 | **Geometry** | Vertices and triangles; shape without appearance |
 | **GLSL** | C-like language shaders are written in |
+| **Heightmap** | Grid of heights defining a surface's relief |
 | **HMR** | Hot module replacement — live code swap without reload |
+| **Lacunarity** | Frequency multiplier between successive octaves |
+| **LOD** | Level of detail — simpler geometry at distance |
 | **Lockfile** | Exact recorded versions of every installed package |
 | **Material** | How a surface responds to light |
 | **Mesh** | Geometry + material; a visible object |
 | **Minify** | Shrink code by removing whitespace and renaming |
+| **Normal** | Vector describing which way a surface faces |
 | **npm** | JavaScript package registry and CLI |
 | **Octave** | One layer of noise at a given frequency/amplitude |
+| **Persistence** | Amplitude multiplier between successive octaves |
+| **PRNG** | Pseudo-random number generator; seedable, repeatable |
 | **Scene graph** | Tree of objects, parents transforming children |
 | **Shader** | Small program that runs on the GPU |
 | **Simplex noise** | Smooth seeded pseudo-random function |

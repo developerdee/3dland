@@ -23,13 +23,18 @@ body {
 
 #hud {
   position: fixed;
-  top: 12px;
+  bottom: 12px;
   left: 12px;
   padding: 6px 10px;
   border-radius: 6px;
   background: rgb(0 0 0 / 0.45);
-  color: #cfd6e4;
+  color: #e8edf5;
   font: 12px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   pointer-events: none;
   user-select: none;
+}
+
+/* Keep lil-gui's panel clear of the HUD. */
+.lil-gui.root {
+  --width: 300px;
 }
