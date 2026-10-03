@@ -169,6 +169,27 @@ reads as dramatic while keeping under 3% of the surface steeper than 45°, so
 walking works nearly everywhere. Pushing amplitude or frequency much higher
 makes it alpine and unpleasant on foot.
 
+### Water parameters
+
+| Parameter | Effect |
+| --- | --- |
+| `enabled` | Water on or off entirely |
+| `sea level` | Surface height, as a fraction of the terrain's range |
+| `shallow` / `deep` | Colour at the shore and in deep water |
+| `depth fade` | How quickly deep colour takes over, in world units |
+| `wave height` / `scale` / `speed` | Ripple size, choppiness and rate |
+| `reflectivity` | Strength of the mirrored sky on the surface |
+| `foam width` | Width of the surf band at the shoreline |
+
+The default sea level submerges about 22% of an average world, though it varies
+widely between seeds — some get islands, others inland lakes. The curve is
+steep because the terrain's `exponent` flattens low ground: 0.34 leaves
+puddles, 0.50 floods nearly half the map.
+
+In walk mode you wade into the shallows and stop, rather than strolling along
+the seabed. The sand band in the shading tracks sea level automatically, so
+beaches stay at the waterline when you move it.
+
 ### Shading parameters
 
 | Parameter | Effect |
@@ -198,6 +219,7 @@ src/engine/Sky.ts           gradient sky dome, follows the camera
 src/terrain/heightmap.ts    noise -> heights (the generation maths)
 src/terrain/TerrainMesh.ts  heights -> renderable geometry
 src/terrain/TerrainMaterial.ts  slope/altitude shading (GLSL injection)
+src/terrain/Water.ts        animated water, depth from a heightmap texture
 src/terrain/random.ts       seeded PRNG, for reproducible worlds
 src/terrain/gui.ts          lil-gui parameter panel
 src/style.css               page and HUD styling
@@ -221,7 +243,8 @@ The intent is that stages 2 onward add modules without modifying `Viewer`.
       controls, sky and fog.
 - [x] **3 — Camera.** Pointer-lock fly and walk modes, with mode switching.
 - [x] **4 — Shading.** Slope/altitude materials, gradient sky, fog, tone mapping.
-- [ ] **5 — Scale.** Water plane; chunked terrain with LOD for large worlds.
+- [x] **5a — Water.** Depth-based colour, waves, Fresnel reflection, shore foam.
+- [ ] **5b — Chunking.** Terrain tiles with LOD, for a world without edges.
 - [ ] **6 — Interaction.** Terrain collision and character movement.
 
 Shading is per-pixel in the fragment shader, injected into Three's standard

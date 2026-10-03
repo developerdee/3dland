@@ -97,6 +97,11 @@ export class Sky {
     return this.uniforms.uHorizon.value;
   }
 
+  /** The zenith colour, for surfaces that reflect the sky. */
+  get zenithColor(): THREE.Color {
+    return this.uniforms.uTop.value;
+  }
+
   set(colors: SkyColors): void {
     this.uniforms.uTop.value.set(colors.top);
     this.uniforms.uHorizon.value.set(colors.horizon);

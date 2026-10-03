@@ -1,6 +1,7 @@
 import GUI from 'lil-gui';
 import type { TerrainParams } from './heightmap';
 import type { TerrainShadingParams } from './TerrainMaterial';
+import type { WaterParams } from './Water';
 
 /** Mutable holder so the dropdown and the keyboard shortcuts stay in sync. */
 export interface ModeRef {
@@ -31,6 +32,10 @@ export interface TerrainGuiOptions {
   onQualityChange: () => void;
   /** Copies a shareable URL pinning the current seed. */
   onShareSeed: () => void;
+  /** Water surface controls. Uniform-only, bar the on/off toggle. */
+  water: WaterParams;
+  waterEnabled: { on: boolean };
+  onWaterChange: () => void;
 }
 
 /**
@@ -96,6 +101,19 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
   look.add(shading, 'blend', 0.001, 0.3, 0.005).name('band blend').onChange(s);
   look.add(shading, 'macroVariation', 0, 0.4, 0.01).name('colour variation').onChange(s);
 
+  const { water: w, onWaterChange: ow } = options;
+  const sea = gui.addFolder('Water');
+  sea.add(options.waterEnabled, 'on').name('enabled').onChange(ow);
+  sea.add(w, 'level', 0, 0.8, 0.005).name('sea level').onChange(ow);
+  sea.addColor(w, 'shallowColor').name('shallow').onChange(ow);
+  sea.addColor(w, 'deepColor').name('deep').onChange(ow);
+  sea.add(w, 'depthFade', 1, 60, 0.5).name('depth fade').onChange(ow);
+  sea.add(w, 'waveHeight', 0, 1.5, 0.02).name('wave height').onChange(ow);
+  sea.add(w, 'waveScale', 0.02, 0.5, 0.01).name('wave scale').onChange(ow);
+  sea.add(w, 'waveSpeed', 0, 2, 0.05).name('wave speed').onChange(ow);
+  sea.add(w, 'reflectivity', 0, 1, 0.02).name('reflectivity').onChange(ow);
+  sea.add(w, 'foamWidth', 0, 6, 0.1).name('foam width').onChange(ow);
+
   const light = gui.addFolder('Sun');
   light.add(options.sun, 'azimuth', 0, 360, 1).name('azimuth°').onChange(options.onSunChange);
   light.add(options.sun, 'elevation', 2, 88, 1).name('elevation°').onChange(options.onSunChange);
@@ -105,6 +123,7 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
 
   detail.close();
   world.close();
+  sea.close();
   light.close();
   display.close();
 

@@ -27,6 +27,7 @@ It is written to be read in order. Each section builds on the previous one.
 11b. [First-person camera control](#11b-first-person-camera-control)
 11c. [Shading: slope, altitude, and injecting GLSL](#11c-shading-slope-altitude-and-injecting-glsl)
 11d. [Touch controls and input abstraction](#11d-touch-controls-and-input-abstraction)
+11e. [Water](#11e-water)
 12. [Where this goes next](#12-where-this-goes-next)
 13. [Glossary](#13-glossary)
 
@@ -1050,13 +1051,125 @@ constant.
 
 ---
 
+## 11e. Water
+
+Water is the first thing in this project that cannot be done convincingly with
+geometry and a colour. It needs four effects at once, and omitting any one
+makes it read as a blue plane.
+
+### Depth without the depth buffer
+
+The usual way to find how deep water is at a pixel is to read the depth buffer
+— what the terrain wrote before the water drew over it. That works, but it
+means either a second render pass or a depth-texture copy, and it couples the
+water to render order.
+
+Since we *generated* the terrain, we already know its height everywhere. So the
+heightmap is uploaded once as a single-channel float texture, and the shader
+reads the seabed directly:
+
+```glsl
+vec2 uv = vWorldPos.xz / uTerrainSize + 0.5;
+float groundHeight = mix(uMinHeight, uMaxHeight, texture2D(uHeightMap, uv).r);
+float depth = uWaterLevel - groundHeight;
+if (depth < 0.0) discard;
+```
+
+That `discard` matters: without it, the water plane extends over dry land as a
+transparent film, which looks like a bug rather than like water.
+
+`FloatType` rather than the usual 8-bit texture, because 256 height levels
+across a 90-unit range would band the depth gradient visibly at the shore.
+
+### Fresnel: the term that makes it look wet
+
+Look straight down into clear water and you see the bottom. Look across it at a
+glancing angle and it is a mirror. That shift is the **Fresnel effect**, and
+Schlick's approximation of it is one line:
+
+```glsl
+float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 4.0);
+color = mix(base, reflected, fresnel * uReflectivity);
+```
+
+If you implement only one thing from this section, implement this. It does more
+for believability than waves, foam and colour combined.
+
+### Waves, and deriving their normals
+
+Two crossing sine trains at different angles and rates. A single sine reads as
+corrugated iron; crossing them breaks up the periodicity enough to pass as open
+water.
+
+The subtlety is lighting. Displacing vertices without updating their normals
+leaves the surface lit as though it were still flat — all the ripples, none of
+the glint. Rather than supply a normal map, the shader samples the wave
+function either side of each vertex and takes the difference:
+
+```glsl
+float hL = waveHeightAt(world.xz - vec2(e, 0.0), t) * uWaveHeight;
+float hR = waveHeightAt(world.xz + vec2(e, 0.0), t) * uWaveHeight;
+// ...same for the z axis
+vNormal = normalize(vec3(hL - hR, 2.0 * e, hD - hU));
+```
+
+This is numerical differentiation — the gradient of the height field, which is
+exactly what a normal is. The step `e` is deliberately coarse: sampling finer
+gives a noisier normal, not a more accurate one.
+
+### What a raw ShaderMaterial costs you
+
+The terrain extends `MeshStandardMaterial`, so it inherits lighting and fog.
+Water is a `ShaderMaterial` written from scratch, which means **fog is not
+included** — and the water would have stayed sharp and bright at a distance
+where the terrain had faded into haze, which looks badly wrong.
+
+So the fog equation is reimplemented by hand to match the scene's `FogExp2`:
+
+```glsl
+float fogFactor = 1.0 - exp(-pow(uFogDensity * dist, 2.0));
+color = mix(color, uHorizonColor, clamp(fogFactor, 0.0, 1.0));
+```
+
+Same for the sun: the material has no idea where the `DirectionalLight` is, so
+its direction is passed in as a uniform and kept in sync whenever the sun
+moves. This is the recurring tax on bespoke shaders — every piece of scene
+state you want, you wire up yourself.
+
+### Three bugs the numbers caught
+
+None of these would have thrown an error.
+
+**The default sea level left puddles.** At 0.34 of the terrain range, only 5% of
+an average world was submerged. Measuring across random seeds showed the curve
+is steep — 0.40 gives 11%, 0.50 gives 42% — because the terrain's `exponent`
+flattens low ground into a narrow band. 0.44 gives a 22% mean, which is real
+coastline.
+
+**Beaches were invisible.** The shading's sand band sat at 0.06 of the range
+while the water sat at 0.44 — the entire beach was 38% of the range below the
+surface. Two systems expressing heights in the same units, with nothing tying
+them together. The shore band is now derived from sea level, so moving the
+water carries the beach with it.
+
+**One load in five started underwater.** With a fifth of the world submerged,
+spawning at the origin put you on the seabed about 18% of the time. A spiral
+search outward from the centre finds dry land in about four samples.
+
+The pattern across all three: each system was individually correct, and the
+bugs lived in the relationships between them. Unit tests on `Water` in
+isolation would have passed.
+
+---
+
 ## 12. Where this goes next
 
 - [x] **1 — Scaffold.** Build tooling, render loop, CI deploy.
 - [x] **2 — Terrain.** Seeded fBm heightmap, debug GUI, orbit controls, fog.
 - [x] **3 — Camera.** Pointer-lock fly and walk modes.
 - [x] **4 — Shading.** Slope/altitude materials, gradient sky, tone mapping.
-- [ ] **5 — Scale.** Water; chunked terrain with LOD.
+- [x] **5a — Water.** Depth colour, waves, Fresnel, shore foam.
+- [ ] **5b — Chunking.** Terrain tiles with LOD, for an endless world.
 - [ ] **6 — Interaction.** Collision and character movement.
 
 Two things worth previewing, both from stage 5 — the point where the current
@@ -1091,6 +1204,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **ES module** | Standard JavaScript `import`/`export` system |
 | **fBm** | Fractal Brownian motion — summed octaves of noise |
 | **Fragment shader** | GPU program computing one pixel's colour |
+| **Fresnel** | Reflectivity rising at glancing view angles |
 | **Frustum** | The truncated pyramid of space a camera can see |
 | **Geometry** | Vertices and triangles; shape without appearance |
 | **GLSL** | C-like language shaders are written in |
