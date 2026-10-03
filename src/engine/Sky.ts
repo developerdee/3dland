@@ -30,13 +30,21 @@ export const defaultSky: SkyColors = {
 export class Sky {
   readonly mesh: THREE.Mesh;
 
+  /** Geometry radius, used to compute the scale `follow()` applies. */
+  private readonly baseRadius: number;
+
   private readonly uniforms = {
     uTop: { value: new THREE.Color(defaultSky.top) },
     uHorizon: { value: new THREE.Color(defaultSky.horizon) },
     uBottom: { value: new THREE.Color(defaultSky.bottom) },
   };
 
-  constructor(radius = 4000) {
+  /**
+   * `radius` must sit inside the camera's far plane, or the whole dome is
+   * clipped away and you see the scene background instead. The default is
+   * chosen against Viewer's 2000-unit far plane with room to spare.
+   */
+  constructor(radius = 1500) {
     const material = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
       side: THREE.BackSide, // we are inside the sphere
@@ -77,6 +85,7 @@ export class Sky {
 
     // Low segment counts are fine: the gradient is computed per-pixel, so the
     // geometry only has to be round enough not to show facets at the silhouette.
+    this.baseRadius = radius;
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 16), material);
     this.mesh.renderOrder = -1;
     // The dome follows the camera, so it must never be culled by its bounds.
@@ -97,9 +106,19 @@ export class Sky {
   /**
    * Keeps the dome centred on the camera, so it behaves like an infinitely
    * distant sky rather than a sphere you can fly out of.
+   *
+   * Also scales it to sit comfortably inside the camera's far plane. A dome
+   * larger than the far plane is clipped away entirely — you see the scene
+   * background instead of sky, which looks like the shader failed rather than
+   * like a depth problem.
    */
-  follow(camera: THREE.Camera): void {
+  follow(camera: THREE.PerspectiveCamera): void {
     this.mesh.position.copy(camera.position);
+
+    const target = camera.far * 0.5;
+    if (Math.abs(this.mesh.scale.x - target / this.baseRadius) > 1e-4) {
+      this.mesh.scale.setScalar(target / this.baseRadius);
+    }
   }
 
   dispose(): void {

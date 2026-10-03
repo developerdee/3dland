@@ -21,6 +21,10 @@ const sky = new Sky();
 viewer.scene.add(sky.mesh);
 viewer.onUpdate(() => sky.follow(viewer.camera));
 
+// Backstop behind the dome. Viewer's default is near-black, which looks like a
+// shader failure rather than a gap if the dome is ever clipped or culled.
+viewer.scene.background = sky.horizonColor.clone();
+
 // Fog matched to the horizon colour, so the terrain edge dissolves into the
 // sky instead of ending at a visible line. Exponential-squared falls off more
 // naturally with distance than linear fog.
