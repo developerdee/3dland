@@ -48,14 +48,18 @@ export interface SpeciesRules {
 }
 
 export interface ScatterParams {
-  /** Multiplies every species' density. The performance dial. */
-  densityScale: number;
   /**
-   * Loose trees scattered across the whole map, outside any forest.
+   * Global multiplier, driven by the detail setting. This is the performance
+   * dial; the per-group densities below are the creative ones.
+   */
+  densityScale: number;
+  /** Show forests at all. */
+  forestsEnabled: boolean;
+  /**
+   * Show isolated trees outside any forest.
    *
-   * Real landscapes do have isolated trees — hedgerow survivors, field
-   * boundaries — but far fewer than a uniform scatter implies. Set to 0 to
-   * keep only the forests.
+   * Real landscapes do have lone trees — hedgerow survivors, field boundaries
+   * — but far fewer than a uniform scatter implies.
    */
   looseTrees: boolean;
   trees: SpeciesRules;
@@ -66,13 +70,14 @@ export interface ScatterParams {
 
 export const defaultScatter: ScatterParams = {
   densityScale: 1,
+  forestsEnabled: true,
   looseTrees: true,
   trees: {
-    // Density is a render budget, not an ecological one: a real square
-    // kilometre holds tens of thousands of trees, but ~45 triangles each puts
-    // that far past what a phone will draw. These counts aim for a few
-    // thousand objects total, which reads as woodland at this scale.
-    density: 22,
+    // Lone trees only — forest trees are placed separately and far more
+    // densely. A handful of isolated trees per hectare reads as hedgerow
+    // survivors; the previous value of 22 produced a sparse orchard covering
+    // the entire map, which is what forests exist to replace.
+    density: 3,
     // Trees stop below the shoreline and above a treeline, which is the
     // single most recognisable pattern in real landscape.
     minAltitude: 0.46,
@@ -228,9 +233,10 @@ export function scatterForestTrees(
   const placements: Placement[] = [];
   if (forests.length === 0) return placements;
 
-  // Density scale widens the spacing rather than thinning randomly, so a
-  // lower detail setting gives an evenly sparser wood instead of a moth-eaten
-  // one. Never below the walkability floor.
+  // The detail setting widens spacing rather than thinning randomly, so lower
+  // detail gives an evenly sparser wood instead of a moth-eaten one. The
+  // forest's own spacing slider is the creative control; this is the
+  // performance one. Never below the walkability floor, whichever applies.
   const spacing = Math.max(forestParams.spacing / Math.sqrt(densityScale), MIN_TREE_GAP);
   const noise = createForestNoise(context.seed);
   const random = mulberry32(hashSeed(`${context.seed}:forest-trees`));
@@ -354,12 +360,9 @@ export const speciesCollision: Record<'trees' | 'rocks' | 'shrubs', SpeciesColli
 };
 
 export function scatterAll(context: ScatterContext, params: ScatterParams): ScatterResult {
-  const forests = placeForests(
-    context.map,
-    context.waterLevel,
-    context.seed,
-    params.forests,
-  );
+  const forests = params.forestsEnabled
+    ? placeForests(context.map, context.waterLevel, context.seed, params.forests)
+    : [];
 
   const trees = scatterForestTrees(
     context,

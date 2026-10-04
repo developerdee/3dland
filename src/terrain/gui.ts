@@ -115,32 +115,41 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
   // Scatter rebuilds geometry, so these fire on release rather than on drag.
   const { scatter: sc, onScatterChange: os } = options;
   const plants = gui.addFolder('Vegetation');
-  plants.add(options.scatterEnabled, 'on').name('enabled').onChange(os);
-  plants.add(sc, 'densityScale', 0.1, 2, 0.05).name('density').onFinishChange(os);
+  plants.add(options.scatterEnabled, 'on').name('show all vegetation').onChange(os);
 
+  // Forests
   const woods = plants.addFolder('Forests');
+  woods.add(sc, 'forestsEnabled').name('show forests').onFinishChange(os);
   woods.add(sc.forests, 'count', 0, 20, 1).name('how many').onFinishChange(os);
   woods.add(sc.forests, 'radius', 30, 220, 5).name('size (units)').onFinishChange(os);
   woods.add(sc.forests, 'radiusVariation', 0, 0.8, 0.05).name('size variation').onFinishChange(os);
   // Spacing is clamped to the walkability floor internally, so the slider
-  // cannot produce an impassable forest however far it is pushed.
-  woods.add(sc.forests, 'spacing', 3, 14, 0.2).name('tree spacing').onFinishChange(os);
+  // cannot produce an impassable forest however far it is pushed. Lower is
+  // denser, hence the inverted reading of this control.
+  woods.add(sc.forests, 'spacing', 3, 14, 0.2).name('tree spacing (low=dense)').onFinishChange(os);
   woods.add(sc.forests, 'edgeRoughness', 0, 1, 0.05).name('edge roughness').onFinishChange(os);
   woods.add(sc.forests, 'edgeSoftness', 0.05, 0.8, 0.05).name('edge fade').onFinishChange(os);
 
-  const single = plants.addFolder('Scattered');
-  single.add(sc, 'looseTrees').name('lone trees').onFinishChange(os);
-  single.add(sc.trees, 'density', 0, 60, 1).name('lone tree density').onFinishChange(os);
-  single.add(sc.rocks, 'density', 0, 40, 1).name('rocks').onFinishChange(os);
-  single.add(sc.shrubs, 'density', 0, 80, 1).name('shrubs').onFinishChange(os);
+  // Lone trees, independent of the forests above.
+  const lone = plants.addFolder('Lone trees');
+  lone.add(sc, 'looseTrees').name('show lone trees').onFinishChange(os);
+  lone.add(sc.trees, 'density', 0, 30, 0.5).name('density').onFinishChange(os);
 
-  const limits = plants.addFolder('Limits');
+  // These limit where any tree will grow, in a forest or alone — a treeline is
+  // a property of the climate, not of a tree's sociability — so they sit apart
+  // from either group rather than inside one and silently affecting both.
+  const limits = plants.addFolder('Tree limits (both)');
   limits.add(sc.trees, 'maxAltitude', 0, 1, 0.01).name('treeline').onFinishChange(os);
-  limits.add(sc.trees, 'maxSlope', 0.1, 1, 0.02).name('tree max slope').onFinishChange(os);
+  limits.add(sc.trees, 'maxSlope', 0.1, 1, 0.02).name('max slope').onFinishChange(os);
+
+  const ground = plants.addFolder('Rocks and shrubs');
+  ground.add(sc.rocks, 'density', 0, 40, 1).name('rocks').onFinishChange(os);
+  ground.add(sc.shrubs, 'density', 0, 80, 1).name('shrubs').onFinishChange(os);
 
   woods.open();
-  single.close();
+  lone.open();
   limits.close();
+  ground.close();
 
   const { water: w, onWaterChange: ow } = options;
   const sea = gui.addFolder('Water');

@@ -198,18 +198,28 @@ which leaves a 1.8-unit gap against a 0.84-unit body — more than double what i
 needed. This is a hard floor in the code, not a slider: however far `tree
 spacing` is pushed down, an impassable forest cannot be generated.
 
-**Scattered**
+**Lone trees**
 
 | Parameter | Effect |
 | --- | --- |
-| `lone trees` | Isolated trees between the forests — turn off for forests only |
-| `lone tree density` | How many |
-| `rocks` / `shrubs` | Scattered across the whole map as before |
+| `show lone trees` | Isolated trees between forests, on or off |
+| `density` | How many — independent of forest density |
 
 Lone trees are rejected inside a forest boundary, so they read as genuinely
-isolated rather than as a halo around the woodland.
+isolated rather than as a halo around the woodland. Turning forests off
+therefore yields slightly more lone trees, since that rejection no longer
+applies.
 
-**Limits** holds the treeline and the maximum slope trees will grow on.
+**Tree limits (both)** holds the treeline and maximum slope. These apply to
+every tree, in a forest or alone — a treeline is a property of the climate, not
+of a tree's sociability — so they sit apart from either group rather than
+inside one and silently affecting both.
+
+**Rocks and shrubs** are scattered across the whole map as before.
+
+Forests and lone trees are independently switchable, and their densities are
+separate controls: `tree spacing` inside a forest, `density` for lone trees.
+The detail setting still scales everything globally as the performance dial.
 
 Around 6,000 trees at medium detail, drawn in 8 draw calls — `InstancedMesh`
 renders many copies of one geometry at once, so thousands of trees cost about
