@@ -81,7 +81,7 @@ export class TerrainMesh {
 
     // The shader expresses its bands as 0-1 of the terrain's range, so it
     // needs to know what that range currently is.
-    this.surfaceMaterial.setHeightRange(this.map.min, this.map.max);
+    this.surfaceMaterial.setHeightRange(this.map.landMin, this.map.max);
 
     this.geometry = geometry;
     this.surface = new THREE.Mesh(geometry, this.surfaceMaterial);

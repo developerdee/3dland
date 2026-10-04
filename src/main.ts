@@ -139,11 +139,11 @@ viewer.onUpdate((_dt, elapsed) => sea.update(elapsed));
 // invisible until the first slider was touched.
 {
   const hm = terrain.heightmap;
-  sea.setTerrain(hm.heights, hm.resolution, hm.size, hm.min, hm.max);
+  sea.setTerrain(hm.heights, hm.resolution, hm.size, hm.min, hm.max, hm.landMin, hm.landMedian);
   sea.apply(water);
   sea.visible = waterEnabled.on;
   syncShoreline();
-  collision.setTerrain(terrain.heightmap);
+  collision.setTerrain(terrain.heightmap, sea.visible ? sea.surfaceY : null);
   rebuildScatter();
 }
 
@@ -243,7 +243,7 @@ function regenerate(): void {
   // Water reads depth from the terrain, so it must be re-fed or it keeps the
   // shape of the previous landscape.
   const hm = terrain.heightmap;
-  sea.setTerrain(hm.heights, hm.resolution, hm.size, hm.min, hm.max);
+  sea.setTerrain(hm.heights, hm.resolution, hm.size, hm.min, hm.max, hm.landMin, hm.landMedian);
   sea.apply(water);
   sea.visible = waterEnabled.on;
   // A rebuild resets the material's height range, so the beach band has to be
@@ -251,8 +251,9 @@ function regenerate(): void {
   syncShoreline();
 
   // Collision reads the live heightmap, so it must be re-pointed at the new
-  // one — and the world edge moves with `size`.
-  collision.setTerrain(terrain.heightmap);
+  // one. The travel limit is derived from the shoreline, so this must come
+  // after the water level is settled.
+  collision.setTerrain(terrain.heightmap, sea.visible ? sea.surfaceY : null);
 
   // Props are placed against the terrain and the waterline, so both must be
   // settled before this runs.
@@ -318,6 +319,8 @@ const gui = createTerrainGui({
     sea.visible = waterEnabled.on;
     sea.apply(water);
     syncShoreline();
+    // The travel limit is derived from the shoreline, which has just moved.
+    collision.setTerrain(terrain.heightmap, sea.visible ? sea.surfaceY : null);
     // Props avoid the water, so moving sea level must replace them.
     rebuildScatter();
     // Sea level moves the walking surface, so a walker standing in the

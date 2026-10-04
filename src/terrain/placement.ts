@@ -158,7 +158,8 @@ export function scatterSpecies(
   // Seeded per species, so changing tree density does not reshuffle the rocks.
   const random = mulberry32(hashSeed(`${context.seed}:${label}`));
 
-  const range = map.max - map.min || 1;
+  // Altitude is measured from the lowest land, not the island's sea floor.
+  const range = map.max - map.landMin || 1;
 
   for (let gz = 0; gz < cells; gz++) {
     for (let gx = 0; gx < cells; gx++) {
@@ -176,7 +177,7 @@ export function scatterSpecies(
       const slope = slopeAt(map, x, z);
       if (slope > rules.maxSlope) continue;
 
-      const altitude = (height - map.min) / range;
+      const altitude = (height - map.landMin) / range;
 
       // Probabilistic edges: inside the band an object almost always appears,
       // and the chance tapers across `altitudeFade`. A hard cut-off draws a
@@ -240,7 +241,7 @@ export function scatterForestTrees(
   const spacing = Math.max(forestParams.spacing / Math.sqrt(densityScale), MIN_TREE_GAP);
   const noise = createForestNoise(context.seed);
   const random = mulberry32(hashSeed(`${context.seed}:forest-trees`));
-  const range = map.max - map.min || 1;
+  const range = map.max - map.landMin || 1;
 
   // Separation is enforced against a spatial hash rather than every previous
   // tree: a dense forest holds thousands, and an all-pairs check would be
@@ -293,7 +294,7 @@ export function scatterForestTrees(
         const slope = slopeAt(map, x, z);
         if (slope > rules.maxSlope) continue;
 
-        const altitude = (height - map.min) / range;
+        const altitude = (height - map.landMin) / range;
         if (
           altitude < rules.minAltitude - rules.altitudeFade ||
           altitude > rules.maxAltitude + rules.altitudeFade

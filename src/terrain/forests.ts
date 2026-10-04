@@ -89,7 +89,9 @@ export function placeForests(
   if (params.count <= 0) return [];
 
   const random = mulberry32(hashSeed(`${seed}:forests`));
-  const range = map.max - map.min || 1;
+  // Measured from the lowest land, so the island's sea floor does not skew
+  // the altitude band forests are allowed to sit in.
+  const range = map.max - map.landMin || 1;
   const half = map.size / 2;
 
   interface Candidate {
@@ -113,7 +115,7 @@ export function placeForests(
 
     if (waterLevel !== null && height < waterLevel + SITING.waterClearance) continue;
 
-    const altitude = (height - map.min) / range;
+    const altitude = (height - map.landMin) / range;
     if (altitude < SITING.minAltitude || altitude > SITING.maxAltitude) continue;
 
     const slope = slopeAt(map, x, z);

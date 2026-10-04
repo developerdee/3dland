@@ -43,11 +43,47 @@ export class Collision {
     this.enabled = value;
   }
 
-  setTerrain(map: Heightmap): void {
+  /**
+   * Sets the terrain, and the limit of travel.
+   *
+   * With an island, stopping at the mesh edge would mean swimming hundreds of
+   * units out to an invisible wall in open ocean. Instead the limit sits a
+   * short wade beyond the furthest shoreline — far enough that the water
+   * around the island is real and walkable, close enough that you are never
+   * out of sight of land.
+   *
+   * `waterLevel` null means no water, so the limit falls back to the mesh.
+   */
+  setTerrain(map: Heightmap, waterLevel: number | null, wadeMargin = 14): void {
     this.map = map;
-    // Keep the camera a little inside the mesh edge: exactly at the boundary,
-    // the terrain's final triangle is half outside the sampled region.
-    this.bounds = map.size / 2 - 1.5;
+
+    // Exactly at the mesh boundary the terrain's final triangle is half
+    // outside the sampled region, so always hold back a little.
+    const meshLimit = map.size / 2 - 1.5;
+
+    if (waterLevel === null) {
+      this.bounds = meshLimit;
+      return;
+    }
+
+    // Furthest point of dry land from the centre, on either axis. Sampled on
+    // a stride: this runs on terrain rebuild, and a coastline does not need
+    // per-vertex precision.
+    const { heights, resolution, size } = map;
+    const stride = Math.max(1, Math.floor(resolution / 128));
+    let furthestLand = 0;
+
+    for (let z = 0; z < resolution; z += stride) {
+      for (let x = 0; x < resolution; x += stride) {
+        if (heights[z * resolution + x]! <= waterLevel) continue;
+        const wx = Math.abs((x / (resolution - 1) - 0.5) * size);
+        const wz = Math.abs((z / (resolution - 1) - 0.5) * size);
+        const reach = Math.max(wx, wz);
+        if (reach > furthestLand) furthestLand = reach;
+      }
+    }
+
+    this.bounds = Math.min(furthestLand + wadeMargin, meshLimit);
   }
 
   /**

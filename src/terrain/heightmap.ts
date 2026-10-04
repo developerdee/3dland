@@ -30,6 +30,22 @@ export interface TerrainParams {
    * the output range to whatever extremes this particular seed happens to hit.
    */
   normalizeRange: boolean;
+  /**
+   * Pull the terrain down toward the edges, so the land is an island in open
+   * ocean rather than a square slab that stops abruptly.
+   */
+  island: boolean;
+  /**
+   * Fraction of the half-width over which the falloff acts. 0.35 leaves the
+   * middle 65% unaffected and shapes a coast in the outer third.
+   */
+  islandFalloff: number;
+  /**
+   * How far below the lowest land the sea floor drops at the very edge, as a
+   * fraction of amplitude. Deep enough that the shore reads as a coast rather
+   * than a puddle rim.
+   */
+  islandDepth: number;
 }
 
 export const defaultParams: TerrainParams = {
@@ -48,6 +64,9 @@ export const defaultParams: TerrainParams = {
   exponent: 1.9,
   ridged: false,
   normalizeRange: true,
+  island: true,
+  islandFalloff: 0.38,
+  islandDepth: 0.55,
 };
 
 /**
@@ -85,6 +104,25 @@ export interface Heightmap {
   readonly size: number;
   readonly min: number;
   readonly max: number;
+  /**
+   * Lowest height excluding the island falloff — the floor of the terrain the
+   * noise actually generated.
+   *
+   * Sea level is expressed as a fraction of the *land's* range, not the full
+   * range: the island's sea floor can sit far below everything else, and
+   * anchoring to that would drag the shoreline down with it, flooding the
+   * island whenever the falloff depth changed.
+   */
+  readonly landMin: number;
+  /**
+   * Median height of the island's interior, excluding the falloff skirt.
+   *
+   * Sea level anchors to this rather than to a fraction of the range, because
+   * the range's endpoints move with every seed: a fixed fraction flooded some
+   * islands to 77% and others to 26%. The median is stable, so the same
+   * setting yields a comparable coastline on every world.
+   */
+  readonly landMedian: number;
 }
 
 /**
@@ -125,6 +163,9 @@ export function generateHeightmap(params: TerrainParams): Heightmap {
 
   let min = Infinity;
   let max = -Infinity;
+  // Defaults to `min`; the island pass overrides it with the pre-falloff
+  // value before lowering `min` to the sea floor.
+  let landMin = 0;
 
   for (let z = 0; z < resolution; z++) {
     for (let x = 0; x < resolution; x++) {
@@ -181,7 +222,69 @@ export function generateHeightmap(params: TerrainParams): Heightmap {
     max = params.amplitude / 2;
   }
 
-  return { heights, resolution, size, min, max };
+  if (params.island) {
+    // Applied after normalisation, not before: normalising would stretch the
+    // range back out and undo the falloff entirely.
+    //
+    // The mask uses the larger of the two axis distances rather than radial
+    // distance, so the drop-off follows the square edge of the mesh. A radial
+    // mask would leave the four corners above water.
+    const floor = min - params.amplitude * params.islandDepth;
+    const falloff = Math.max(params.islandFalloff, 0.01);
+
+    for (let z = 0; z < resolution; z++) {
+      for (let x = 0; x < resolution; x++) {
+        // 0 at the centre, 1 at the edge.
+        const u = Math.abs((x / (resolution - 1)) * 2 - 1);
+        const v = Math.abs((z / (resolution - 1)) * 2 - 1);
+        const edge = Math.max(u, v);
+
+        // Nothing happens until the falloff zone begins.
+        const t = Math.max(0, (edge - (1 - falloff)) / falloff);
+        if (t <= 0) continue;
+
+        // Cubic easing: a gentle shelving beach near the land, steepening into
+        // deeper water. Linear reads as a cone, which looks artificial.
+        const blend = t * t * (3 - 2 * t);
+
+        const i = z * resolution + x;
+        heights[i] = heights[i]! * (1 - blend) + floor * blend;
+      }
+    }
+
+    // The falloff only ever lowers terrain, so max is unchanged and min
+    // becomes the sea floor at the edge. landMin keeps the pre-falloff floor,
+    // which is what sea level is measured against.
+    landMin = min;
+    min = floor;
+  }
+
+  // Median of the interior, for a sea level that behaves consistently across
+  // seeds. Sampled on a stride rather than sorting every height: a 512-grid
+  // holds 262,144 values and the median does not need that precision.
+  const interior: number[] = [];
+  const skirt = params.island ? params.islandFalloff : 0;
+  const stride = Math.max(1, Math.floor(resolution / 96));
+  for (let z = 0; z < resolution; z += stride) {
+    for (let x = 0; x < resolution; x += stride) {
+      const u = Math.abs((x / (resolution - 1)) * 2 - 1);
+      const v = Math.abs((z / (resolution - 1)) * 2 - 1);
+      if (Math.max(u, v) > 1 - skirt) continue;
+      interior.push(heights[z * resolution + x]!);
+    }
+  }
+  interior.sort((a, b) => a - b);
+  const landMedian = interior.length > 0 ? interior[Math.floor(interior.length / 2)]! : 0;
+
+  return {
+    heights,
+    resolution,
+    size,
+    min,
+    max,
+    landMin: params.island ? landMin : min,
+    landMedian,
+  };
 }
 
 /**

@@ -99,6 +99,9 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
   world.add({ randomize: onRandomSeed }, 'randomize').name('new world');
   world.add({ share: options.onShareSeed }, 'share').name('copy link to world');
   world.add(params, 'size', 200, 2000, 50).name('size (units)').onFinishChange(onChange);
+  world.add(params, 'island').name('island').onFinishChange(onChange);
+  world.add(params, 'islandFalloff', 0.1, 0.6, 0.02).name('coast width').onFinishChange(onChange);
+  world.add(params, 'islandDepth', 0.1, 1.2, 0.05).name('ocean depth').onFinishChange(onChange);
 
   // Shading is uniform-only, so these fire on every drag frame rather than on
   // release — the feedback is immediate and costs nothing.

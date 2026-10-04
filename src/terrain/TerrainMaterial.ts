@@ -73,9 +73,16 @@ export class TerrainMaterial extends THREE.MeshStandardMaterial {
     super({ roughness: 0.95, metalness: 0.0 });
   }
 
-  /** Terrain height range, so altitude bands can be expressed as 0-1. */
-  setHeightRange(min: number, max: number): void {
-    this.uniforms.uMinHeight!.value = min;
+  /**
+   * Terrain height range, so altitude bands can be expressed as 0-1.
+   *
+   * Bands are measured from `landMin` rather than the absolute minimum: with
+   * an island, the sea floor sits far below the land, and measuring from
+   * there would push every band — shoreline, rock line, snow line — up into
+   * the land and leave the shore underwater.
+   */
+  setHeightRange(landMin: number, max: number): void {
+    this.uniforms.uMinHeight!.value = landMin;
     this.uniforms.uMaxHeight!.value = max;
   }
 

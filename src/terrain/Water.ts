@@ -2,7 +2,14 @@ import * as THREE from 'three';
 
 /** Live-tunable water controls. */
 export interface WaterParams {
-  /** Surface height, as a fraction (0-1) of the terrain's vertical range. */
+  /**
+   * Surface height, relative to the median height of the island's interior.
+   *
+   * 0.5 puts the sea at the median, drowning about half the interior. Lower
+   * means more land. Expressed this way rather than as a fraction of the
+   * height range because the range's endpoints move with every seed, which
+   * made a fixed fraction flood some islands and barely wet others.
+   */
   level: number;
   /** Colour of deep water. */
   deepColor: number;
@@ -23,12 +30,9 @@ export interface WaterParams {
 }
 
 export const defaultWater: WaterParams = {
-  // Submerges ~22% of an average world, which gives real coastline. The
-  // terrain's exponent flattens low ground, so the curve here is steep:
-  // 0.34 leaves puddles, 0.50 floods nearly half the map. Variance between
-  // seeds is wide (10-70%) and deliberate — some worlds get islands, others
-  // inland lakes, which is what makes rerolling interesting.
-  level: 0.44,
+  // Below the median, so the majority of the island stays dry while the low
+  // ground gives inlets, bays and the odd inland lake.
+  level: 0.34,
   deepColor: 0x0f3550,
   shallowColor: 0x3f8fa8,
   depthFade: 14,
@@ -59,6 +63,9 @@ export class Water {
   private readonly material: THREE.ShaderMaterial;
   private heightTexture: THREE.DataTexture | null = null;
   private params: WaterParams = { ...defaultWater };
+  /** Lowest land height, and the interior's median, for sea level. */
+  private landMin = 0;
+  private landMedian = 0;
 
   constructor() {
     this.material = new THREE.ShaderMaterial({
@@ -239,7 +246,15 @@ export class Water {
    * Rebuilds the depth lookup from a heightmap. Call whenever the terrain
    * changes, or the water will be shaped by the previous landscape.
    */
-  setTerrain(heights: Float32Array, resolution: number, size: number, min: number, max: number): void {
+  setTerrain(
+    heights: Float32Array,
+    resolution: number,
+    size: number,
+    min: number,
+    max: number,
+    landMin: number,
+    landMedian: number,
+  ): void {
     // Encode height as a normalised single channel. A DataTexture avoids any
     // image decoding, and linear filtering smooths the depth gradient between
     // samples so the shoreline is not stair-stepped.
@@ -270,7 +285,9 @@ export class Water {
     // any terrain size. Slightly oversized to hide the seam at the edge.
     this.mesh.scale.set(size * 1.02, 1, size * 1.02);
 
-    this.applyLevel(min, max);
+    this.landMin = landMin;
+    this.landMedian = landMedian;
+    this.applyLevel();
   }
 
   apply(params: WaterParams): void {
@@ -285,7 +302,7 @@ export class Water {
     u.uReflectivity!.value = params.reflectivity;
     u.uFoamWidth!.value = params.foamWidth;
 
-    this.applyLevel(u.uMinHeight!.value as number, u.uMaxHeight!.value as number);
+    this.applyLevel();
   }
 
   /** Keeps lighting and atmosphere in step with the rest of the scene. */
@@ -305,8 +322,14 @@ export class Water {
     this.heightTexture?.dispose();
   }
 
-  private applyLevel(min: number, max: number): void {
-    const y = min + (max - min) * this.params.level;
+  private applyLevel(): void {
+    // Anchored to the interior's median height, scaled by `level`. The median
+    // is stable across seeds where the range's endpoints are not, so the same
+    // setting gives a comparable coastline on every world.
+    const max = this.material.uniforms.uMaxHeight!.value as number;
+    const span = Math.max(max - this.landMin, 1e-6);
+    const medianFraction = (this.landMedian - this.landMin) / span;
+    const y = this.landMin + span * (medianFraction * (this.params.level / 0.5));
     this.material.uniforms.uWaterLevel!.value = y;
     this.mesh.position.y = y;
   }
