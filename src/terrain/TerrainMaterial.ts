@@ -61,6 +61,7 @@ export class TerrainMaterial extends THREE.MeshStandardMaterial {
     uSlopeRockFull: { value: defaultShading.slopeRockFull },
     uBlend: { value: defaultShading.blend },
     uMacroVariation: { value: defaultShading.macroVariation },
+    uBiomeStrength: { value: 1 },
     uSand: { value: new THREE.Color(PALETTE.sand) },
     uGrassLow: { value: new THREE.Color(PALETTE.grassLow) },
     uGrassHigh: { value: new THREE.Color(PALETTE.grassHigh) },
@@ -84,6 +85,11 @@ export class TerrainMaterial extends THREE.MeshStandardMaterial {
   setHeightRange(landMin: number, max: number): void {
     this.uniforms.uMinHeight!.value = landMin;
     this.uniforms.uMaxHeight!.value = max;
+  }
+
+  /** 0 falls back to the altitude bands; 1 uses the biome colours fully. */
+  setBiomeStrength(value: number): void {
+    this.uniforms.uBiomeStrength!.value = value;
   }
 
   apply(params: TerrainShadingParams): void {
@@ -110,6 +116,10 @@ export class TerrainMaterial extends THREE.MeshStandardMaterial {
         #include <common>
         varying vec3 vWorldPos;
         varying vec3 vWorldNormal;
+        // Biome colour, blended per vertex on the CPU. Interpolation across
+        // the triangle gives smooth biome transitions for free.
+        attribute vec3 biomeColor;
+        varying vec3 vBiomeColor;
         `,
       )
       .replace(
@@ -118,6 +128,7 @@ export class TerrainMaterial extends THREE.MeshStandardMaterial {
         #include <worldpos_vertex>
         vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
         vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);
+        vBiomeColor = biomeColor;
         `,
       );
 
@@ -128,6 +139,8 @@ export class TerrainMaterial extends THREE.MeshStandardMaterial {
         #include <common>
         varying vec3 vWorldPos;
         varying vec3 vWorldNormal;
+        varying vec3 vBiomeColor;
+        uniform float uBiomeStrength;
 
         // Computed in the colour block, consumed later by the roughness
         // injection — the two run in separate shader chunks, so this carries
@@ -208,6 +221,12 @@ export class TerrainMaterial extends THREE.MeshStandardMaterial {
           // Snow settles on altitude but slides off anything steep.
           float snowHold = snowy * (1.0 - smoothstep(0.30, 0.62, slope));
           albedo = mix(albedo, uSnow, snowHold);
+
+          // Biome tint replaces the grass/soil colour, but not rock or snow:
+          // exposed rock and snow look the same whatever biome they are in,
+          // and letting a desert tint tint the snowline looks wrong.
+          float groundShare = (1.0 - slopeRock) * (1.0 - snowHold);
+          albedo = mix(albedo, vBiomeColor, groundShare * uBiomeStrength);
 
           // Shoreline sits under everything else, and only on gentle ground.
           albedo = mix(albedo, uSand, shore * (1.0 - slopeRock));

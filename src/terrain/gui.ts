@@ -3,6 +3,7 @@ import type { TerrainParams } from './heightmap';
 import type { TerrainShadingParams } from './TerrainMaterial';
 import type { WaterParams } from './Water';
 import type { ScatterParams } from './placement';
+import { BIOME_IDS, type BiomeParams } from './biomes';
 
 /** Mutable holder so the dropdown and the keyboard shortcuts stay in sync. */
 export interface ModeRef {
@@ -37,6 +38,10 @@ export interface TerrainGuiOptions {
   water: WaterParams;
   waterEnabled: { on: boolean };
   onWaterChange: () => void;
+  /** Biome distribution and per-biome settings. */
+  biomes: BiomeParams;
+  biomesEnabled: { on: boolean };
+  onBiomeChange: () => void;
   /** Shadow quality. Higher covers more ground at finer resolution. */
   shadows: { level: 'off' | 'low' | 'medium' | 'high' };
   onShadowChange: () => void;
@@ -116,6 +121,22 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
   look.add(shading, 'macroVariation', 0, 0.4, 0.01).name('colour variation').onChange(s);
 
   // Scatter rebuilds geometry, so these fire on release rather than on drag.
+  // Biomes: a folder per biome, each independently switchable with its own
+  // share of the map and its own vegetation density.
+  const ob = options.onBiomeChange;
+  const bio = gui.addFolder('Biomes');
+  bio.add(options.biomesEnabled, 'on').name('biomes on').onFinishChange(ob);
+  bio.add(options.biomes, 'moistureScale', 0.4, 4, 0.1).name('region size').onFinishChange(ob);
+  bio.add(options.biomes, 'blend', 0, 0.3, 0.01).name('edge blend').onFinishChange(ob);
+  for (const id of BIOME_IDS) {
+    const folder = bio.addFolder(id);
+    folder.add(options.biomes[id], 'enabled').name('enabled').onFinishChange(ob);
+    folder.add(options.biomes[id], 'weight', 0, 2, 0.05).name('share of map').onFinishChange(ob);
+    folder.add(options.biomes[id], 'vegetation', 0, 1.5, 0.05).name('vegetation').onFinishChange(ob);
+    folder.close();
+  }
+  bio.close();
+
   const { scatter: sc, onScatterChange: os } = options;
   const plants = gui.addFolder('Vegetation');
   plants.add(options.scatterEnabled, 'on').name('show all vegetation').onChange(os);

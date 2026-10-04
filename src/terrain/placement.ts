@@ -2,6 +2,27 @@ import type { Heightmap } from './heightmap';
 import { sampleHeight } from './heightmap';
 import { hashSeed, mulberry32 } from './random';
 import { slopeAt } from './surface';
+import { BIOME_IDS, type BiomeField, type BiomeParams } from './biomes';
+
+/** Per-position vegetation multiplier, derived from the biome field. */
+export interface BiomeVegetation {
+  factorAt(x: number, z: number, map: Heightmap): number;
+}
+
+/** Wraps a biome field into the multiplier placement needs. */
+export function biomeVegetation(field: BiomeField, params: BiomeParams): BiomeVegetation {
+  return {
+    factorAt(x, z, map) {
+      const weights = field.sample(x, z, map);
+      let factor = 0;
+      for (let i = 0; i < BIOME_IDS.length; i++) {
+        const weight = weights[i]!;
+        if (weight > 0) factor += weight * params[BIOME_IDS[i]!].vegetation;
+      }
+      return factor;
+    },
+  };
+}
 import {
   MIN_TREE_GAP,
   createForestNoise,
@@ -118,6 +139,12 @@ export const defaultScatter: ScatterParams = {
 
 export interface ScatterContext {
   map: Heightmap;
+  /**
+   * Biome field, when biomes are active. Each biome scales the vegetation it
+   * carries, so a desert is near-bare and a forest biome dense, on top of the
+   * slope and altitude rules that already applied.
+   */
+  biomes?: BiomeVegetation | null;
   /** Water surface height in world units, or null when water is off. */
   waterLevel: number | null;
   /** Seed, so a world's vegetation is reproducible with its terrain. */
@@ -198,7 +225,8 @@ export function scatterSpecies(
       // Thin out on steeper ground rather than cutting at the limit exactly.
       const slopeFactor = 1 - smoothstep(rules.maxSlope * 0.55, rules.maxSlope, slope);
 
-      if (random() > lowEdge * highEdge * slopeFactor) continue;
+      const biomeFactor = context.biomes ? context.biomes.factorAt(x, z, map) : 1;
+      if (random() > lowEdge * highEdge * slopeFactor * biomeFactor) continue;
 
       placements.push({
         x,
@@ -285,8 +313,10 @@ export function scatterForestTrees(
 
         const density = forestDensityAt(forests, noise, x, z, forestParams);
         if (density <= 0) continue;
-        // Density thins the canopy toward the edge.
-        if (random() > density) continue;
+        // Density thins the canopy toward the edge, and the biome thins it
+        // further — a forest reaching into tundra should peter out.
+        const biomeFactor = context.biomes ? context.biomes.factorAt(x, z, map) : 1;
+        if (random() > density * biomeFactor) continue;
 
         const height = sampleHeight(map, x, z);
         if (waterLevel !== null && height < waterLevel + rules.waterClearance) continue;

@@ -163,11 +163,60 @@ bug can be reproduced on the exact terrain that caused it.
 | `lacunarity` | How fast octaves get finer. ~2 is conventional |
 | `size` | World extent in units. Fly speed scales with it |
 | `seed` | Any string. The same seed always rebuilds the same world |
+| `island` | Terrain falls away to ocean at the edges |
+| `coast width` | How much of the map the falloff occupies |
+| `ocean depth` | How deep the sea floor drops at the edge |
+
+The world is an island in open ocean. The travel limit sits a short wade beyond
+the furthest shoreline, so you can walk into the shallows and stop there rather
+than swimming to an invisible wall far out at sea.
+
+Sea level is measured against the median height of the island's interior rather
+than a fraction of the height range. The range's endpoints move with every
+seed, so a fixed fraction flooded some islands and barely wet others; anchoring
+to the median gives a comparable coastline every time — around 48% dry land,
+with a standard deviation under 1%.
 
 The defaults are tuned together: 90 units of relief over a 1000-unit world
 reads as dramatic while keeping under 3% of the surface steeper than 45°, so
 walking works nearly everywhere. Pushing amplitude or frequency much higher
 makes it alpine and unpleasant on foot.
+
+### Biomes
+
+Five biomes — **aquatic**, **desert**, **grassland**, **forest**, **tundra** —
+each with its own ground colours and vegetation density. Every one is
+independently switchable, with its own share of the map and its own vegetation
+multiplier.
+
+Distribution follows altitude and moisture, which is how real biome maps work.
+A second noise field supplies moisture; combined with height above the
+shoreline it picks the biome, so wet lowlands become grassland, dry lowlands
+desert, and high ground tundra — coherent regions without placing anything by
+hand.
+
+| Parameter | Effect |
+| --- | --- |
+| `biomes on` | All biome colouring and density, on or off |
+| `region size` | Size of the moisture regions; lower is broader |
+| `edge blend` | Softness of the transitions between biomes |
+| per biome: `enabled` | Whether it appears at all |
+| per biome: `share of map` | Its weight against the others |
+| per biome: `vegetation` | Multiplies what grows there |
+
+Classification scores every enabled biome and normalises, so the map is always
+fully covered: disabling grassland widens its neighbours rather than leaving
+bare patches.
+
+Altitude is measured from the shoreline and rescaled against the land's own
+range. Raw altitude is a poor classifier here because dry land occupies a
+narrow slice of the full height range — measured at 0.37 to 0.98, with 59% of
+it inside a single tenth — so niches spread over 0–1 would aim most of their
+range at altitudes holding no land.
+
+Biome colour replaces the ground tint but not rock or snow: exposed rock looks
+the same whatever biome it is in, and a desert tint on the snowline looks
+wrong.
 
 ### Vegetation parameters
 
@@ -303,6 +352,7 @@ src/terrain/heightmap.ts    noise -> heights (the generation maths)
 src/terrain/TerrainMesh.ts  heights -> renderable geometry
 src/terrain/TerrainMaterial.ts  slope/altitude shading (GLSL injection)
 src/terrain/Water.ts        animated water, depth from a heightmap texture
+src/terrain/biomes.ts       biome classification by altitude and moisture
 src/terrain/forests.ts      forest siting and irregular boundaries
 src/terrain/surface.ts      slope sampling, shared by placement and forests
 src/terrain/placement.ts    where props go: density, slope and altitude rules
@@ -336,6 +386,8 @@ The intent is that stages 2 onward add modules without modifying `Viewer`.
 - [x] **6 — Collision.** Solid ground, world edges, trees and rocks.
 - [x] **7 — Shadows.** Sun shadows with a viewer-following shadow map.
 - [x] **8 — Forests.** Clustered woodland with irregular, walkable boundaries.
+- [x] **9 — Island.** Terrain falls away to open ocean; travel limit offshore.
+- [x] **10 — Biomes.** Five configurable biomes by altitude and moisture.
 - [ ] **Chunking.** Terrain tiles with LOD, for a world without edges.
 
 

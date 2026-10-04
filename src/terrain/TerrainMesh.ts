@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { generateHeightmap, type Heightmap, type TerrainParams } from './heightmap';
 import { TerrainMaterial, type TerrainShadingParams } from './TerrainMaterial';
+import { BIOME_COLORS, BIOME_IDS, type BiomeField } from './biomes';
 
 /**
  * The terrain as a renderable object: a plane whose vertices are displaced by
@@ -57,6 +58,56 @@ export class TerrainMesh {
    */
   applyShading(shading: TerrainShadingParams): void {
     this.surfaceMaterial.apply(shading);
+  }
+
+  /**
+   * Writes a biome colour per vertex.
+   *
+   * Done on the CPU and interpolated across each triangle, rather than
+   * classified per-pixel in the shader: the moisture noise and the weighted
+   * blend would be a lot of fragment work for a value that varies over tens of
+   * units, and vertex interpolation smooths the biome boundaries for free.
+   */
+  applyBiomes(field: BiomeField | null): void {
+    if (!this.geometry || !this.map) return;
+
+    const position = this.geometry.attributes.position as THREE.BufferAttribute;
+    const count = position.count;
+    const data = new Float32Array(count * 3);
+
+    if (field) {
+      const blended = new THREE.Color();
+      const single = new THREE.Color();
+
+      for (let i = 0; i < count; i++) {
+        const x = position.getX(i);
+        const z = position.getZ(i);
+        const weights = field.sample(x, z, this.map);
+        const altitude = field.landAltitude(x, z, this.map);
+
+        blended.setRGB(0, 0, 0);
+        for (let b = 0; b < BIOME_IDS.length; b++) {
+          const weight = weights[b]!;
+          if (weight <= 0) continue;
+          const palette = BIOME_COLORS[BIOME_IDS[b]!];
+          // Each biome darkens or lightens with height within itself, which
+          // keeps large single-biome regions from reading as flat colour.
+          single.set(palette.low).lerp(SCRATCH.set(palette.high), altitude);
+          blended.r += single.r * weight;
+          blended.g += single.g * weight;
+          blended.b += single.b * weight;
+        }
+
+        data[i * 3] = blended.r;
+        data[i * 3 + 1] = blended.g;
+        data[i * 3 + 2] = blended.b;
+      }
+    }
+
+    this.geometry.setAttribute('biomeColor', new THREE.BufferAttribute(data, 3));
+    // Strength 0 when there is no field, so the shader falls back to its own
+    // altitude bands rather than multiplying by black.
+    this.surfaceMaterial.setBiomeStrength(field ? 1 : 0);
   }
 
   /** Regenerates heights and geometry from scratch. */
@@ -128,3 +179,6 @@ export class TerrainMesh {
     position.needsUpdate = true;
   }
 }
+
+/** Reused colour, so the per-vertex loop does not allocate. */
+const SCRATCH = new THREE.Color();

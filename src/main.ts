@@ -20,7 +20,13 @@ import { Water, defaultWater, type WaterParams } from './terrain/Water';
 import { Collision } from './engine/Collision';
 import { Shadows, type ShadowQuality } from './engine/Shadows';
 import { Scatter } from './terrain/Scatter';
-import { defaultScatter, type ScatterParams } from './terrain/placement';
+import { defaultScatter, biomeVegetation, type ScatterParams } from './terrain/placement';
+import {
+  createBiomeField,
+  defaultBiomes,
+  type BiomeField,
+  type BiomeParams,
+} from './terrain/biomes';
 import { createTerrainGui } from './terrain/gui';
 import './style.css';
 
@@ -109,6 +115,9 @@ const scatterParams: ScatterParams = {
 };
 const scatterEnabled = { on: true };
 const collisionEnabled = { on: true };
+const biomes: BiomeParams = { ...defaultBiomes };
+const biomesEnabled = { on: true };
+let biomeField: BiomeField | null = null;
 // Shadows are the most expensive single feature here — they re-render the
 // casters from the sun's point of view each frame — so phones start lower.
 const shadowQuality: { level: ShadowQuality } = {
@@ -144,6 +153,7 @@ viewer.onUpdate((_dt, elapsed) => sea.update(elapsed));
   sea.visible = waterEnabled.on;
   syncShoreline();
   collision.setTerrain(terrain.heightmap, sea.visible ? sea.surfaceY : null);
+  rebuildBiomes();
   rebuildScatter();
 }
 
@@ -255,6 +265,9 @@ function regenerate(): void {
   // after the water level is settled.
   collision.setTerrain(terrain.heightmap, sea.visible ? sea.surfaceY : null);
 
+  // Biome altitude is measured from the shoreline, so this follows the water.
+  rebuildBiomes();
+
   // Props are placed against the terrain and the waterline, so both must be
   // settled before this runs.
   rebuildScatter();
@@ -303,6 +316,12 @@ const gui = createTerrainGui({
     regenerate();
     gui.controllersRecursive().forEach((c) => c.updateDisplay());
   },
+  biomes,
+  biomesEnabled,
+  onBiomeChange: () => {
+    rebuildBiomes();
+    rebuildScatter();
+  },
   shadows: shadowQuality,
   onShadowChange: () => {
     shadows.set(shadowQuality.level);
@@ -321,6 +340,8 @@ const gui = createTerrainGui({
     syncShoreline();
     // The travel limit is derived from the shoreline, which has just moved.
     collision.setTerrain(terrain.heightmap, sea.visible ? sea.surfaceY : null);
+    // Biome bands are measured from the shoreline too.
+    rebuildBiomes();
     // Props avoid the water, so moving sea level must replace them.
     rebuildScatter();
     // Sea level moves the walking surface, so a walker standing in the
@@ -343,6 +364,25 @@ const gui = createTerrainGui({
  * Replaces the vegetation. Placement depends on the terrain *and* the
  * waterline, so this must run after both are settled.
  */
+/**
+ * Rebuilds the biome field and applies it to the terrain's colours.
+ *
+ * Must run before `rebuildScatter`, which reads the field to thin vegetation
+ * per biome, and after the water level is settled, since biome altitude is
+ * measured from the shoreline.
+ */
+function rebuildBiomes(): void {
+  biomeField = biomesEnabled.on
+    ? createBiomeField(
+        params.seed,
+        biomes,
+        sea.visible ? sea.surfaceY : null,
+        terrain.heightmap,
+      )
+    : null;
+  terrain.applyBiomes(biomeField);
+}
+
 function rebuildScatter(): void {
   const started = performance.now();
   scatter.rebuild(
@@ -352,6 +392,7 @@ function rebuildScatter(): void {
       // Shares the terrain's seed, so a world's vegetation is as reproducible
       // as its landscape.
       seed: params.seed,
+      biomes: biomeField ? biomeVegetation(biomeField, biomes) : null,
     },
     scatterParams,
   );

@@ -32,6 +32,7 @@ It is written to be read in order. Each section builds on the previous one.
 11g. [Collision](#11g-collision)
 11h. [Shadows](#11h-shadows)
 11i. [Forests: clustering, and a constraint that cannot be violated](#11i-forests-clustering-and-a-constraint-that-cannot-be-violated)
+11j. [Islands and biomes](#11j-islands-and-biomes)
 12. [Where this goes next](#12-where-this-goes-next)
 13. [Glossary](#13-glossary)
 
@@ -1614,6 +1615,117 @@ weaker evidence than it feels.
 
 ---
 
+## 11j. Islands and biomes
+
+Two changes that interact more than they look like they should.
+
+### Making an island
+
+The falloff that pulls terrain down at the edges is simple — but three details
+each break it if got wrong.
+
+**Use the axis distance, not the radius.** A radial mask leaves the four
+corners of a square mesh above water, because the corners are further from the
+centre than the edge midpoints. `Math.max(|u|, |v|)` follows the square.
+
+**Apply it after range normalisation.** Normalising stretches the result to
+span the requested amplitude, so a falloff applied first is simply stretched
+back out and undone.
+
+**Ease it cubically.** Linear interpolation from land to sea floor reads as a
+cone. `t * t * (3 - 2 * t)` gives a shelving beach that steepens into deep
+water.
+
+### The two bugs an island causes elsewhere
+
+Neither would have thrown an error, and both were caught by measuring.
+
+**Sea level broke.** It was a fraction of the full height range, and an island
+drops its sea floor far below the land — so the previous default put the sea
+at -33 and drowned 56% of the map. Worse, the range's endpoints move with
+every seed: a fixed fraction flooded some islands to 77% and others to 26%.
+
+Sea level now anchors to the **median height of the island's interior**, which
+is stable where the endpoints are not. Measured across ten islands: 48% dry
+land, standard deviation 0.7%, against roughly 20% before.
+
+**Every altitude band broke.** Shoreline, rock line, snow line, treeline,
+forest siting — all measured altitude from the absolute minimum, which the
+island's sea floor had just moved hundreds of units downward. The tree band
+would have sat underwater and the snowline part-way down the land.
+
+They all now measure from `landMin`, the pre-falloff floor. The general shape
+here is worth noting: **one system changed the meaning of a number five other
+systems were reading.** No interface changed, nothing failed to compile.
+
+### Biomes by altitude and moisture
+
+Real biome maps are driven by temperature and rainfall. On a single island
+temperature tracks altitude closely enough to substitute, so a second noise
+field supplies moisture and the pair picks the biome.
+
+Each biome gets a **niche** — a preferred altitude and moisture with a spread —
+and classification scores every enabled biome, then normalises:
+
+```typescript
+const fit = Math.exp(-(da * da + dm * dm));   // Gaussian falloff
+scratch[i] = fit * settings.weight;
+// ...then divide every entry by the total
+```
+
+Normalising is what makes the toggles work properly: because the weights always
+sum to 1, the map is **always fully covered**. Disabling grassland widens its
+neighbours rather than leaving bare patches. Verified — with any one biome
+disabled, coverage stays at 100%.
+
+### The measurement that fixed the distribution
+
+The first attempt gave tundra 1.5% of the map and grassland 59%. The niches
+looked reasonable, so the obvious move was to adjust them by feel.
+
+Measuring the terrain explained it instead. Dry land occupies a *narrow slice*
+of the full height range:
+
+```
+altitude 0.3-0.4:   3.8%
+altitude 0.4-0.5:  21.8%
+altitude 0.5-0.6:  58.8%   <-- most of the island
+altitude 0.6-0.7:  12.6%
+```
+
+Land spans 0.37 to 0.98, with 59% of it inside a single tenth. Niches spread
+across 0–1 were aiming most of their range at altitudes where no land exists.
+
+So altitude is now rescaled against the land's own range — 0 at the shoreline,
+1 at the highest peak — with a `pow(raw, 0.55)` curve, because land area falls
+off sharply with height and a linear measure would give sparse high ground as
+much of the biome range as the crowded lowlands. All five biomes then appear,
+consistently across seeds.
+
+The lesson: a distribution that looks wrong is often a *measurement* problem
+rather than a tuning problem, and tuning by feel would have chased it forever.
+
+### Colouring: CPU per vertex, not GPU per pixel
+
+The biome colour is computed on the CPU, written into a vertex attribute, and
+interpolated across each triangle. The alternative — classifying per pixel in
+the fragment shader — would mean sampling the moisture noise and running the
+weighted blend for every pixel on screen, for a value that varies over tens of
+world units. Vertex interpolation also smooths the biome boundaries for free.
+
+One detail in the shader: the biome tint replaces the ground colour but **not**
+rock or snow.
+
+```glsl
+float groundShare = (1.0 - slopeRock) * (1.0 - snowHold);
+albedo = mix(albedo, vBiomeColor, groundShare * uBiomeStrength);
+```
+
+Exposed rock looks the same whatever biome surrounds it, and a desert tint
+bleeding into the snowline looks obviously wrong.
+
+---
+
 ## 12. Where this goes next
 
 - [x] **1 — Scaffold.** Build tooling, render loop, CI deploy.
@@ -1625,6 +1737,8 @@ weaker evidence than it feels.
 - [x] **6 — Collision.** Solid ground, world edges, trees and rocks.
 - [x] **7 — Shadows.** Sun shadows with a viewer-following shadow map.
 - [x] **8 — Forests.** Clustered woodland with irregular, walkable boundaries.
+- [x] **9 — Island.** Terrain falls away to ocean; travel limit offshore.
+- [x] **10 — Biomes.** Five configurable biomes by altitude and moisture.
 - [ ] **Chunking.** Terrain tiles with LOD, for an endless world.
 
 
@@ -1657,6 +1771,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **Delta time (`dt`)** | Seconds elapsed since the previous frame |
 | **Dependency** | External package your project uses |
 | **Dispose** | Explicitly free a GPU resource; not automatic |
+| **Biome** | A region defined by climate; here altitude plus moisture |
 | **Broad phase** | Cheap first pass narrowing what needs a real collision test |
 | **Cascaded shadows** | Several shadow maps at increasing scales |
 | **Circular import** | Two modules importing each other; fails at runtime |
@@ -1674,6 +1789,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **LOD** | Level of detail — simpler geometry at distance |
 | **dvh** | Dynamic viewport height; tracks mobile browser chrome |
 | **Instancing** | Drawing many copies of one geometry in a single call |
+| **Moisture field** | Noise standing in for rainfall, to place biomes |
 | **Peter-panning** | Shadow detached from its caster, from excess bias |
 | **Shadow acne** | Self-shadowing stipple from depth imprecision |
 | **Shadow map** | Depth buffer rendered from the light's point of view |
