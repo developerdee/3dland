@@ -213,6 +213,32 @@ export interface ScatterResult {
   shrubs: Placement[];
 }
 
+/**
+ * Collision volume for one species, in units of its base geometry.
+ *
+ * Deliberately narrower than the visible mesh: a conifer's canopy is wide but
+ * you walk through the branches, not the trunk. Matching the silhouette would
+ * make woodland feel like a maze of invisible walls.
+ */
+export interface SpeciesCollision {
+  /** Horizontal radius, multiplied by each instance's scale. */
+  radius: number;
+  /** Height of the blocking volume, multiplied by instance scale. */
+  height: number;
+  /** Whether this species blocks movement at all. */
+  solid: boolean;
+}
+
+export const speciesCollision: Record<'trees' | 'rocks' | 'shrubs', SpeciesCollision> = {
+  // Trunk-width, not canopy-width.
+  trees: { radius: 0.34, height: 4.2, solid: true },
+  // Boulders are close to their visible size.
+  rocks: { radius: 0.46, height: 0.72, solid: true },
+  // Shrubs are brushed through, not blocked by — stopping dead at knee-high
+  // scrub feels broken rather than realistic.
+  shrubs: { radius: 0.3, height: 0.4, solid: false },
+};
+
 export function scatterAll(context: ScatterContext, params: ScatterParams): ScatterResult {
   return {
     trees: scatterSpecies(context, params.trees, params.densityScale, 'trees'),

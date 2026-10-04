@@ -190,8 +190,26 @@ uniform random points, which avoids the bare-patch-next-to-thicket clumping
 that random placement produces.
 
 The prop meshes are built in code, not loaded — no assets, no download, and a
-variant is a parameter rather than another file. **There is no collision yet**,
-so you walk straight through everything; that's stage 6.
+variant is a parameter rather than another file.
+
+### Collision
+
+Solid in every mode: the ground is a floor you cannot pass through, the world
+edge is a wall, and tree trunks and boulders block you. Flying still takes you
+up and over mountains freely — you simply cannot fly inside one, and flying
+into a slope rides you up it rather than stopping dead.
+
+Collision volumes are upright cylinders, not meshes. A trunk is narrower than
+its canopy, deliberately: matching the silhouette would make woodland feel like
+a maze of invisible walls. Shrubs do not block at all — stopping dead at
+knee-high scrub feels broken rather than realistic.
+
+Props are indexed into a uniform grid, so a check touches only the handful of
+obstacles in neighbouring cells rather than all 2,900. Measured at 0.38µs per
+resolve, against a 16,700µs frame budget.
+
+There is a **collision** switch under Display for inspecting the world
+unobstructed; the HUD shows `noclip` while it is off.
 
 ### Water parameters
 
@@ -239,6 +257,7 @@ src/engine/FlyControls.ts   pointer-lock mouse look, WASD, ground following
 src/engine/CameraModes.ts   orbit/fly/walk switching, kept continuous
 src/engine/TouchControls.ts on-screen twin sticks for touch devices
 src/engine/ModeButtons.ts   on-screen mode switcher
+src/engine/Collision.ts     terrain, world-edge and prop collision
 src/engine/Sky.ts           gradient sky dome, follows the camera
 src/terrain/heightmap.ts    noise -> heights (the generation maths)
 src/terrain/TerrainMesh.ts  heights -> renderable geometry
@@ -272,8 +291,9 @@ The intent is that stages 2 onward add modules without modifying `Viewer`.
 - [x] **4 — Shading.** Slope/altitude materials, gradient sky, fog, tone mapping.
 - [x] **5a — Water.** Depth-based colour, waves, Fresnel reflection, shore foam.
 - [x] **5b — Scatter.** Instanced trees, rocks and shrubs placed by rule.
-- [ ] **5c — Chunking.** Terrain tiles with LOD, for a world without edges.
-- [ ] **6 — Interaction.** Terrain collision and character movement.
+- [x] **6 — Collision.** Solid ground, world edges, trees and rocks.
+- [ ] **Chunking.** Terrain tiles with LOD, for a world without edges.
+
 
 Shading is per-pixel in the fragment shader, injected into Three's standard
 material so physically-based lighting, fog and tone mapping come for free.

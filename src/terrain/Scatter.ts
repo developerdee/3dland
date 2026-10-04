@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import { buildProps, disposeProps, type PropSet } from './props';
-import { scatterAll, type Placement, type ScatterContext, type ScatterParams } from './placement';
+import {
+  scatterAll,
+  speciesCollision,
+  type Placement,
+  type ScatterContext,
+  type ScatterParams,
+} from './placement';
+import type { Obstacle } from '../engine/Collision';
 
 /**
  * Renders scattered props as instanced meshes.
@@ -20,6 +27,7 @@ export class Scatter {
   private readonly material: THREE.MeshLambertMaterial;
   private meshes: THREE.InstancedMesh[] = [];
   private count = 0;
+  private obstacles: Obstacle[] = [];
 
   constructor() {
     this.props = buildProps();
@@ -34,6 +42,11 @@ export class Scatter {
   /** Total instances currently placed, for the HUD. */
   get instanceCount(): number {
     return this.count;
+  }
+
+  /** Collision volumes for the solid props, for the physics to index. */
+  get collisionVolumes(): Obstacle[] {
+    return this.obstacles;
   }
 
   set visible(value: boolean) {
@@ -54,6 +67,14 @@ export class Scatter {
     this.addSpecies(result.trees, this.props.trees);
     this.addSpecies(result.rocks, this.props.rocks);
     this.addSpecies(result.shrubs, this.props.shrubs);
+
+    // Build collision volumes from the same placements that were drawn, so
+    // what blocks you is always what you can see.
+    this.obstacles = [
+      ...toObstacles(result.trees, speciesCollision.trees),
+      ...toObstacles(result.rocks, speciesCollision.rocks),
+      ...toObstacles(result.shrubs, speciesCollision.shrubs),
+    ];
   }
 
   dispose(): void {
@@ -120,5 +141,21 @@ export class Scatter {
     }
     this.meshes = [];
     this.count = 0;
+    this.obstacles = [];
   }
+}
+
+/** Converts placements into collision cylinders, skipping non-solid species. */
+function toObstacles(
+  placements: Placement[],
+  rules: { radius: number; height: number; solid: boolean },
+): Obstacle[] {
+  if (!rules.solid) return [];
+  return placements.map((p) => ({
+    x: p.x,
+    z: p.z,
+    radius: rules.radius * p.scale,
+    bottom: p.y,
+    top: p.y + rules.height * p.scale,
+  }));
 }

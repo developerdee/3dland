@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Collision } from './Collision';
 
 export interface FlyControlsOptions {
   /** Horizontal movement speed, world units per second. */
@@ -40,9 +41,11 @@ export class FlyControls {
   /** Supplies terrain height at a world position, for `groundOffset`. */
   sampleGround: ((x: number, z: number) => number) | null = null;
   /**
-   * Half-extent of the walkable area. Height lookups clamp at the terrain
-   * edge, so without this you walk off the mesh onto an invisible plateau at
-   * the edge's height — no error, just a confusing void. Null disables it.
+   * Half-extent of the traversable area.
+   *
+   * Movement no longer uses this — `Collision` enforces the world edge for
+   * every mode. It remains so that code placing the camera directly (mode
+   * switches, respawns) can clamp into the world without a collision pass.
    */
   walkBounds: number | null = null;
 
@@ -53,6 +56,25 @@ export class FlyControls {
   /** Intent from on-screen controls, summed with the keyboard's. */
   private readonly externalMove = new THREE.Vector3();
   private externalBoost = false;
+
+  /**
+   * Collision resolver. When unset, movement is unrestricted — useful for
+   * debugging, and the state before terrain exists.
+   */
+  collision: Collision | null = null;
+
+  /** Horizontal half-width of the mover, for obstacle tests. */
+  bodyRadius = 0.42;
+
+  /**
+   * Minimum gap between the camera and the terrain when flying. Without it
+   * you can press the camera flush against the surface, where the near plane
+   * clips through and you see inside the mesh.
+   */
+  flyGroundClearance = 0.6;
+
+  /** Reused each frame: collision runs in the render loop. */
+  private readonly resolved = { x: 0, y: 0, z: 0, hit: false };
 
   // Reused each frame: allocating vectors inside the render loop generates
   // garbage 60 times a second, and GC pauses show up as stutter.
@@ -214,24 +236,52 @@ export class FlyControls {
       this.motion.y += Math.min(Math.max(climb, -1), 1);
     }
 
+    const position = this.camera.position;
+    const fromX = position.x;
+    const fromZ = position.z;
+
     if (this.motion.lengthSq() > 0) {
       const boost =
         this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.externalBoost;
       this.motion.multiplyScalar(this.speed * (boost ? this.boostMultiplier : 1) * step);
-      this.camera.position.add(this.motion);
+      position.add(this.motion);
     }
 
     if (walking) {
-      if (this.walkBounds !== null) {
-        const b = this.walkBounds;
-        const p = this.camera.position;
-        p.x = Math.min(Math.max(p.x, -b), b);
-        p.z = Math.min(Math.max(p.z, -b), b);
-      }
-
+      // Follow the surface first, then let collision correct it. Doing this
+      // before the obstacle pass means the feet height used for vertical
+      // overlap tests is the one the walker will actually have.
       if (this.sampleGround) {
-        const ground = this.sampleGround(this.camera.position.x, this.camera.position.z);
-        this.camera.position.y = ground + this.groundOffset!;
+        position.y = this.sampleGround(position.x, position.z) + this.groundOffset!;
+      }
+    }
+
+    if (this.collision) {
+      // The mover is a vertical capsule: `height` is how far the camera sits
+      // above its feet. Flying, the camera *is* the body, so there is no
+      // offset — which is what lets you hover just above the ground.
+      const height = walking ? this.groundOffset! : 0;
+      const gap = walking ? 0 : this.flyGroundClearance;
+
+      this.collision.resolve(
+        fromX,
+        fromZ,
+        position.x,
+        position.y,
+        position.z,
+        this.bodyRadius,
+        height,
+        gap,
+        this.resolved,
+      );
+
+      position.set(this.resolved.x, this.resolved.y, this.resolved.z);
+
+      // Being pushed out of a tree moves you horizontally, so the surface
+      // under your feet has changed — re-snap, or you end up floating over a
+      // dip or buried in a rise.
+      if (walking && this.resolved.hit && this.sampleGround) {
+        position.y = this.sampleGround(position.x, position.z) + this.groundOffset!;
       }
     }
   }

@@ -17,6 +17,7 @@ import {
 import { TerrainMesh } from './terrain/TerrainMesh';
 import { defaultShading, type TerrainShadingParams } from './terrain/TerrainMaterial';
 import { Water, defaultWater, type WaterParams } from './terrain/Water';
+import { Collision } from './engine/Collision';
 import { Scatter } from './terrain/Scatter';
 import { defaultScatter, type ScatterParams } from './terrain/placement';
 import { createTerrainGui } from './terrain/gui';
@@ -92,6 +93,7 @@ const scatterParams: ScatterParams = {
   densityScale: DENSITY_BY_QUALITY[initialQuality],
 };
 const scatterEnabled = { on: true };
+const collisionEnabled = { on: true };
 const terrain = new TerrainMesh(params);
 terrain.applyShading(shading);
 viewer.scene.add(terrain.group);
@@ -100,6 +102,10 @@ viewer.scene.add(terrain.group);
 // so assigning from a function called during startup would otherwise throw.
 let lastRebuildMs = 0;
 let lastScatterMs = 0;
+
+// Declared with the world objects it serves, ahead of the startup block that
+// feeds it the first terrain.
+const collision = new Collision();
 
 const scatter = new Scatter();
 viewer.scene.add(scatter.group);
@@ -117,6 +123,7 @@ viewer.onUpdate((_dt, elapsed) => sea.update(elapsed));
   sea.apply(water);
   sea.visible = waterEnabled.on;
   syncShoreline();
+  collision.setTerrain(terrain.heightmap);
   rebuildScatter();
 }
 
@@ -156,6 +163,7 @@ const WALK_SPEED = 6.5;
 const FLY_SPEED_FRACTION = 0.085; // of world size per second
 
 const fly = new FlyControls(viewer.camera, canvas, { speed: WALK_SPEED });
+fly.collision = collision;
 fly.walkBounds = params.size / 2;
 
 function speedForMode(mode: CameraMode): number {
@@ -213,6 +221,10 @@ function regenerate(): void {
   // re-derived against it.
   syncShoreline();
 
+  // Collision reads the live heightmap, so it must be re-pointed at the new
+  // one — and the world edge moves with `size`.
+  collision.setTerrain(terrain.heightmap);
+
   // Props are placed against the terrain and the waterline, so both must be
   // settled before this runs.
   rebuildScatter();
@@ -261,6 +273,8 @@ const gui = createTerrainGui({
     regenerate();
     gui.controllersRecursive().forEach((c) => c.updateDisplay());
   },
+  collisionEnabled,
+  onCollisionChange: (on) => collision.setEnabled(on),
   scatter: scatterParams,
   scatterEnabled,
   onScatterChange: rebuildScatter,
@@ -305,6 +319,11 @@ function rebuildScatter(): void {
     scatterParams,
   );
   scatter.visible = scatterEnabled.on;
+
+  // Only what is drawn should block: hiding the props must also remove their
+  // collision, or you would walk into invisible trees.
+  collision.setObstacles(scatterEnabled.on ? scatter.collisionVolumes : []);
+
   lastScatterMs = performance.now() - started;
 }
 
@@ -479,9 +498,10 @@ viewer.onUpdate((dt) => {
   const depthLabel = depth > 0.05 ? ` · depth ${depth.toFixed(1)}` : '';
 
   const props = scatter.visible ? ` · ${scatter.instanceCount.toLocaleString()} props` : '';
+  const solid = collisionEnabled.on ? '' : ' · noclip';
 
   hud.textContent =
-    `${fps} fps · ${tris} tris${props} · ${cameraModes.mode} · ` +
+    `${fps} fps · ${tris} tris${props} · ${cameraModes.mode}${solid} · ` +
     `x ${p.x.toFixed(0)} y ${p.y.toFixed(1)} z ${p.z.toFixed(0)} · ` +
     `ground ${ground.toFixed(1)}${depthLabel} · ` +
     `rebuild ${lastRebuildMs.toFixed(0)}+${lastScatterMs.toFixed(0)} ms`;

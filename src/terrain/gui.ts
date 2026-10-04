@@ -37,6 +37,9 @@ export interface TerrainGuiOptions {
   water: WaterParams;
   waterEnabled: { on: boolean };
   onWaterChange: () => void;
+  /** Collision on or off, for inspecting the world unobstructed. */
+  collisionEnabled: { on: boolean };
+  onCollisionChange: (on: boolean) => void;
   /** Vegetation density and limits. Changing these replaces the props. */
   scatter: ScatterParams;
   scatterEnabled: { on: boolean };
@@ -136,6 +139,10 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
 
   const display = gui.addFolder('Display');
   display.add(view, 'wireframe').name('wireframe').onChange(onWireframeChange);
+  display
+    .add(options.collisionEnabled, 'on')
+    .name('collision')
+    .onChange(options.onCollisionChange);
 
   detail.close();
   world.close();

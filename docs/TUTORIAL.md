@@ -29,6 +29,7 @@ It is written to be read in order. Each section builds on the previous one.
 11d. [Touch controls and input abstraction](#11d-touch-controls-and-input-abstraction)
 11e. [Water](#11e-water)
 11f. [Scatter: placing thousands of objects](#11f-scatter-placing-thousands-of-objects)
+11g. [Collision](#11g-collision)
 12. [Where this goes next](#12-where-this-goes-next)
 13. [Glossary](#13-glossary)
 
@@ -1280,6 +1281,116 @@ budget rather than the biology.
 
 ---
 
+## 11g. Collision
+
+Collision is where a landscape becomes a place you are *in* rather than one you
+look at. It is also where naive implementations fall apart.
+
+### Cylinders, not meshes
+
+The obvious approach is to test the player against the prop geometry. Don't:
+2,900 obstacles at ~60 triangles each is 174,000 triangles to test per frame,
+and the result would be *worse* — catching on individual branches.
+
+Every obstacle is an upright cylinder instead. A trunk is round, a boulder is
+roughly round, and the player is a vertical capsule, so a cylinder test is both
+trivially cheap and close enough that the difference is not felt.
+
+The radius is deliberately **narrower than the visible mesh**. A conifer's
+canopy is wide, but you walk through branches, not the trunk. Matching the
+silhouette would make woodland feel like a maze of invisible walls. Shrubs are
+not solid at all — being stopped dead by knee-high scrub reads as a bug.
+
+### Broad phase: the uniform grid
+
+Testing every obstacle every frame is O(n) per check, which at a few thousand
+obstacles costs more than drawing them. So obstacles are indexed into a grid of
+cells, and a check looks up only the cells its footprint touches:
+
+```typescript
+const minX = Math.floor((x - radius) / this.cellSize);
+// ...registered in every cell its footprint overlaps
+```
+
+Two details matter. An obstacle is registered in **every** cell it overlaps,
+not just the one containing its centre — otherwise a tree straddling a boundary
+would be missed from one side. And because of that, a lookup spanning cells can
+return the same obstacle twice, so duplicates must be filtered or the push gets
+applied twice.
+
+Cell size is derived from the largest obstacle radius. Cells much smaller means
+one obstacle spanning many cells; much larger defeats the index.
+
+Measured: **0.38µs per resolve** with 5,400 obstacles, against a 16,700µs frame
+budget. Roughly 43,000 checks would fit in one frame.
+
+### Resolution order, and why it matters
+
+The sequence is: world edge, then obstacles, then ground. That order is not
+arbitrary.
+
+Pushing out of a tree changes your horizontal position, which changes **which
+ground height applies**. Resolve the ground first and you are standing at the
+height of where you *were*, not where you ended up — so you float over dips and
+sink into rises near every tree.
+
+Same reason the walk-mode surface snap runs again after an obstacle push.
+
+### Push out, don't stop
+
+The tempting fix for a collision is to reject the move — keep the previous
+position. This feels terrible: you stick to walls, and a glancing brush against
+a tree halts you completely.
+
+Instead, push radially out to the cylinder's surface:
+
+```typescript
+const push = (combined - distance) / distance;
+out.x += dx * push;
+out.z += dz * push;
+```
+
+This gives **sliding** for free. The component of your movement along the
+surface survives; only the component into it is cancelled. Measured on a
+glancing pass of a tree: 11.4 of 12 requested units travelled, rather than
+stopping at 6.
+
+Three passes, because pushing clear of one tree can push you into another in
+dense woodland. And resolution is **horizontal only** — being lifted onto a
+tree by walking into it would be worse than being blocked by it.
+
+### The degenerate case
+
+If you end up exactly at an obstacle's centre, `dx` and `dz` are both zero and
+there is no radial direction to push along. Divide by that distance and you get
+`NaN`, which propagates into the camera matrix and blanks the screen.
+
+```typescript
+if (distance < 1e-5) {
+  // Retreat along the approach vector instead.
+}
+```
+
+Any radial push-out needs this branch. It is rare — but "rare" at 60fps means
+it happens.
+
+### What was actually verified
+
+Collision is easier to test numerically than most things in this project,
+because the question is precise: can the player ever be somewhere illegal?
+
+Simulating **120,000 walking steps** across 40 traverses of a real populated
+world gave zero penetration of any obstacle and zero fully-stuck frames.
+Separately: asking to be 50 units underground returns you exactly to the
+surface, all four world edges and corners clamp inside, flying keeps a 0.6-unit
+ground clearance, you can climb freely above the terrain, and flying into a
+mountainside rides you up its slope rather than passing through.
+
+That last one is the specification working as intended: gliding over a mountain
+is fine, passing through it is not.
+
+---
+
 ## 12. Where this goes next
 
 - [x] **1 — Scaffold.** Build tooling, render loop, CI deploy.
@@ -1288,8 +1399,9 @@ budget rather than the biology.
 - [x] **4 — Shading.** Slope/altitude materials, gradient sky, tone mapping.
 - [x] **5a — Water.** Depth colour, waves, Fresnel, shore foam.
 - [x] **5b — Scatter.** Instanced trees, rocks and shrubs, placed by rule.
-- [ ] **5c — Chunking.** Terrain tiles with LOD, for an endless world.
-- [ ] **6 — Interaction.** Collision and character movement.
+- [x] **6 — Collision.** Solid ground, world edges, trees and rocks.
+- [ ] **Chunking.** Terrain tiles with LOD, for an endless world.
+
 
 Two things worth previewing, both from stage 5 — the point where the current
 single-mesh approach stops scaling.
@@ -1320,6 +1432,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **Delta time (`dt`)** | Seconds elapsed since the previous frame |
 | **Dependency** | External package your project uses |
 | **Dispose** | Explicitly free a GPU resource; not automatic |
+| **Broad phase** | Cheap first pass narrowing what needs a real collision test |
 | **Draw call** | One instruction to the GPU; the real cost of many meshes |
 | **ES module** | Standard JavaScript `import`/`export` system |
 | **fBm** | Fractal Brownian motion — summed octaves of noise |
@@ -1334,6 +1447,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **LOD** | Level of detail — simpler geometry at distance |
 | **dvh** | Dynamic viewport height; tracks mobile browser chrome |
 | **Instancing** | Drawing many copies of one geometry in a single call |
+| **Uniform grid** | Space divided into cells, for fast spatial lookup |
 | **Jittered grid** | Even-ish random placement; cheap Poisson-disc stand-in |
 | **Lockfile** | Exact recorded versions of every installed package |
 | **Material** | How a surface responds to light |
