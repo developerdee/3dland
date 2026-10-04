@@ -116,12 +116,31 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
   const { scatter: sc, onScatterChange: os } = options;
   const plants = gui.addFolder('Vegetation');
   plants.add(options.scatterEnabled, 'on').name('enabled').onChange(os);
-  plants.add(sc, 'densityScale', 0, 2, 0.05).name('density').onFinishChange(os);
-  plants.add(sc.trees, 'density', 0, 60, 1).name('trees').onFinishChange(os);
-  plants.add(sc.trees, 'maxAltitude', 0, 1, 0.01).name('treeline').onFinishChange(os);
-  plants.add(sc.trees, 'maxSlope', 0.1, 1, 0.02).name('tree max slope').onFinishChange(os);
-  plants.add(sc.rocks, 'density', 0, 40, 1).name('rocks').onFinishChange(os);
-  plants.add(sc.shrubs, 'density', 0, 80, 1).name('shrubs').onFinishChange(os);
+  plants.add(sc, 'densityScale', 0.1, 2, 0.05).name('density').onFinishChange(os);
+
+  const woods = plants.addFolder('Forests');
+  woods.add(sc.forests, 'count', 0, 20, 1).name('how many').onFinishChange(os);
+  woods.add(sc.forests, 'radius', 30, 220, 5).name('size (units)').onFinishChange(os);
+  woods.add(sc.forests, 'radiusVariation', 0, 0.8, 0.05).name('size variation').onFinishChange(os);
+  // Spacing is clamped to the walkability floor internally, so the slider
+  // cannot produce an impassable forest however far it is pushed.
+  woods.add(sc.forests, 'spacing', 3, 14, 0.2).name('tree spacing').onFinishChange(os);
+  woods.add(sc.forests, 'edgeRoughness', 0, 1, 0.05).name('edge roughness').onFinishChange(os);
+  woods.add(sc.forests, 'edgeSoftness', 0.05, 0.8, 0.05).name('edge fade').onFinishChange(os);
+
+  const single = plants.addFolder('Scattered');
+  single.add(sc, 'looseTrees').name('lone trees').onFinishChange(os);
+  single.add(sc.trees, 'density', 0, 60, 1).name('lone tree density').onFinishChange(os);
+  single.add(sc.rocks, 'density', 0, 40, 1).name('rocks').onFinishChange(os);
+  single.add(sc.shrubs, 'density', 0, 80, 1).name('shrubs').onFinishChange(os);
+
+  const limits = plants.addFolder('Limits');
+  limits.add(sc.trees, 'maxAltitude', 0, 1, 0.01).name('treeline').onFinishChange(os);
+  limits.add(sc.trees, 'maxSlope', 0.1, 1, 0.02).name('tree max slope').onFinishChange(os);
+
+  woods.open();
+  single.close();
+  limits.close();
 
   const { water: w, onWaterChange: ow } = options;
   const sea = gui.addFolder('Water');

@@ -171,48 +171,54 @@ makes it alpine and unpleasant on foot.
 
 ### Vegetation parameters
 
+Trees grow in **forests**, not scattered evenly: real distribution is driven by
+where seeds land and survive, so it clusters. Six forests by default hold about
+80% of the trees while covering a fifth of the map — roughly 4× the density of
+the surrounding land.
+
+**Forests**
+
 | Parameter | Effect |
 | --- | --- |
-| `enabled` | Vegetation on or off entirely |
-| `density` | Multiplies every species. The main performance dial |
-| `trees` / `rocks` / `shrubs` | Per-species density |
-| `treeline` | Altitude above which trees stop |
-| `tree max slope` | Steepness trees will not grow on |
+| `how many` | Number of forests |
+| `size` / `size variation` | Mean radius, and how much individual forests differ |
+| `tree spacing` | Metres between trees at the forest core |
+| `edge roughness` | 0 is a circle; higher gives lobes and inlets |
+| `edge fade` | How far the canopy thins toward the boundary |
 
-Around 5,400 objects at medium detail, drawn in 8 draw calls — `InstancedMesh`
+Forests are sited where woodland actually grows: gentle to moderate slopes,
+rolling ground, valleys and basins where soil and water collect. Candidates are
+scored on slope, altitude and how much of a hollow they sit in, and the best are
+kept — so forests appear in valleys rather than wherever the first valid sample
+landed. They also keep their distance from one another, though a little overlap
+is allowed so neighbouring woods can merge.
+
+**Forests are always walkable.** Tree centres are never closer than 3 units,
+which leaves a 1.8-unit gap against a 0.84-unit body — more than double what is
+needed. This is a hard floor in the code, not a slider: however far `tree
+spacing` is pushed down, an impassable forest cannot be generated.
+
+**Scattered**
+
+| Parameter | Effect |
+| --- | --- |
+| `lone trees` | Isolated trees between the forests — turn off for forests only |
+| `lone tree density` | How many |
+| `rocks` / `shrubs` | Scattered across the whole map as before |
+
+Lone trees are rejected inside a forest boundary, so they read as genuinely
+isolated rather than as a halo around the woodland.
+
+**Limits** holds the treeline and the maximum slope trees will grow on.
+
+Around 6,000 trees at medium detail, drawn in 8 draw calls — `InstancedMesh`
 renders many copies of one geometry at once, so thousands of trees cost about
-what one tree costs in CPU overhead.
-
-Placement follows rules rather than being random: nothing underwater, nothing
-on cliffs, trees between the shoreline and a treeline, rocks favouring high
-ground where soil has eroded. Candidates come from a jittered grid rather than
-uniform random points, which avoids the bare-patch-next-to-thicket clumping
-that random placement produces.
+what one tree costs in CPU overhead. The `density` slider widens forest spacing
+rather than deleting trees at random, so lower settings give an evenly sparser
+wood instead of a moth-eaten one.
 
 The prop meshes are built in code, not loaded — no assets, no download, and a
 variant is a parameter rather than another file.
-
-### Shadows
-
-The sun casts shadows from terrain and props. Terrain both casts and receives,
-so a ridge shadows the valley behind it — which is most of what makes a low sun
-look right.
-
-A single shadow map stretched over a 1000-unit world would give about half a
-unit per texel, so a half-unit tree trunk would cast a one-texel shadow. The
-shadow camera instead covers a region that follows the viewer, giving 5–9
-texels per trunk depending on quality. Beyond that region there are no shadows
-rather than bad ones.
-
-| Quality | Map | Region | Per trunk |
-| --- | --- | --- | --- |
-| low | 1024² | 110u | 4.7 texels |
-| medium | 2048² | 160u | 6.4 texels |
-| high | 4096² | 240u | 8.5 texels |
-
-Touch devices default to low, desktop to medium. Shadows are the most expensive
-single feature here — casters are re-rendered from the sun's view each frame —
-so this is the first control to reach for if frame rate suffers.
 
 ### Collision
 
@@ -287,6 +293,8 @@ src/terrain/heightmap.ts    noise -> heights (the generation maths)
 src/terrain/TerrainMesh.ts  heights -> renderable geometry
 src/terrain/TerrainMaterial.ts  slope/altitude shading (GLSL injection)
 src/terrain/Water.ts        animated water, depth from a heightmap texture
+src/terrain/forests.ts      forest siting and irregular boundaries
+src/terrain/surface.ts      slope sampling, shared by placement and forests
 src/terrain/placement.ts    where props go: density, slope and altitude rules
 src/terrain/props.ts        procedural low-poly tree, rock and shrub geometry
 src/terrain/Scatter.ts      instanced rendering of the placements
@@ -317,6 +325,7 @@ The intent is that stages 2 onward add modules without modifying `Viewer`.
 - [x] **5b — Scatter.** Instanced trees, rocks and shrubs placed by rule.
 - [x] **6 — Collision.** Solid ground, world edges, trees and rocks.
 - [x] **7 — Shadows.** Sun shadows with a viewer-following shadow map.
+- [x] **8 — Forests.** Clustered woodland with irregular, walkable boundaries.
 - [ ] **Chunking.** Terrain tiles with LOD, for a world without edges.
 
 

@@ -28,6 +28,7 @@ export class Scatter {
   private meshes: THREE.InstancedMesh[] = [];
   private count = 0;
   private obstacles: Obstacle[] = [];
+  private forestCount = 0;
 
   constructor() {
     this.props = buildProps();
@@ -42,6 +43,11 @@ export class Scatter {
   /** Total instances currently placed, for the HUD. */
   get instanceCount(): number {
     return this.count;
+  }
+
+  /** How many forests the trees were grouped into, for the HUD. */
+  get forests(): number {
+    return this.forestCount;
   }
 
   /** Collision volumes for the solid props, for the physics to index. */
@@ -63,6 +69,7 @@ export class Scatter {
 
     const result = scatterAll(context, params);
     this.count = result.trees.length + result.rocks.length + result.shrubs.length;
+    this.forestCount = result.forests.length;
 
     this.addSpecies(result.trees, this.props.trees);
     this.addSpecies(result.rocks, this.props.rocks);
@@ -146,6 +153,7 @@ export class Scatter {
     this.meshes = [];
     this.count = 0;
     this.obstacles = [];
+    this.forestCount = 0;
   }
 }
 

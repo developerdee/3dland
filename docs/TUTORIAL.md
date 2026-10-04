@@ -31,6 +31,7 @@ It is written to be read in order. Each section builds on the previous one.
 11f. [Scatter: placing thousands of objects](#11f-scatter-placing-thousands-of-objects)
 11g. [Collision](#11g-collision)
 11h. [Shadows](#11h-shadows)
+11i. [Forests: clustering, and a constraint that cannot be violated](#11i-forests-clustering-and-a-constraint-that-cannot-be-violated)
 12. [Where this goes next](#12-where-this-goes-next)
 13. [Glossary](#13-glossary)
 
@@ -1504,6 +1505,115 @@ mutating it, the other breaks silently.
 
 ---
 
+## 11i. Forests: clustering, and a constraint that cannot be violated
+
+Stage 5b scattered trees evenly across the whole map. That was wrong, and the
+reason is ecological: tree distribution is driven by where seeds land and
+survive, so it clusters. Even spacing reads as an orchard.
+
+The irony is that stage 5b's jittered grid was solving the *opposite* problem —
+avoiding clumps within a patch. Both are needed: clustered at the scale of
+hundreds of units, evenly spaced at the scale of metres.
+
+### Scoring candidates, not accepting them
+
+Forests need to appear where woodland actually grows — gentle slopes, valleys,
+basins where soil and water collect. The naive approach picks random points and
+rejects invalid ones, which puts forests at the first *acceptable* spot rather
+than a *good* one.
+
+Instead, hundreds of candidates are sampled and **scored**:
+
+```typescript
+const score =
+  slopeScore * 0.9 +                      // gentle ground
+  Math.max(gentleScore, 0) * 0.5 +        // rolling beats dead flat
+  basinScore * SITING.basinWeight +       // hollows over rises
+  random() * 0.25;                        // so similar terrain varies
+```
+
+The basin term is the interesting one. It compares each candidate against a
+ring of samples around it: lower than its surroundings means a valley. Measured
+result — all six forests sat at or below their surroundings.
+
+### Irregular boundaries
+
+A circular forest is obvious from above. The boundary is a circle whose radius
+is perturbed by noise sampled *around its perimeter*:
+
+```typescript
+const angle = Math.atan2(dz, dx);
+const wobble = noise(cos(angle) * 1.7 + seed, sin(angle) * 1.7 + seed) * 0.62
+             + noise(cos(angle) * 4.1 + seed, sin(angle) * 4.1 + seed) * 0.38;
+const effectiveRadius = forest.radius * (1 + wobble * params.edgeRoughness);
+```
+
+Two octaves again: broad lobes plus finer inlets. Measured on an isolated
+forest of nominal radius 100: the actual boundary ranges 64–141 units at
+default roughness, and exactly 100–100 at roughness zero.
+
+Density also fades toward the edge, so a forest thins into scattered trees
+rather than stopping at a wall. And because `forestDensityAt` takes the maximum
+across all forests, neighbouring woods merge naturally where they touch.
+
+### The constraint that cannot be violated
+
+The requirement was that a forest must always be walkable. This is unusual and
+worth dwelling on: most parameters are a matter of taste, but an impassable
+forest is a **bug**, not a style choice.
+
+The numbers are knowable. The player is 0.42 units in radius and the widest
+trunk is 0.58, so two trees 2.0 units apart leave exactly zero room to pass. A
+3.0-unit minimum leaves 1.84 units for a 0.84-unit body.
+
+So `MIN_TREE_GAP = 3.0` is a hard floor in the code, and the spacing slider is
+clamped to it:
+
+```typescript
+const spacing = Math.max(forestParams.spacing / Math.sqrt(densityScale), MIN_TREE_GAP);
+```
+
+But a jittered grid alone **cannot** guarantee this — two trees in adjacent
+cells can both jitter toward their shared edge. So separation is additionally
+enforced against a spatial hash, cell size equal to the minimum gap, checking
+the eight neighbours. An all-pairs check would be quadratic on several thousand
+trees.
+
+### The bug that needed the constraint tested, not assumed
+
+Measuring found exactly one violation across a world: 2.834 units where 3.0 was
+required. The forest pass was correct — forest trees alone measured exactly
+3.000 with zero violations.
+
+The culprit was the *lone* trees, added afterwards. A lone tree can fall just
+outside a forest boundary yet still land within 3 units of a tree inside it.
+The separation index now spans both passes. Verified across ten random worlds:
+minimum separation exactly 3.000 units, zero violations.
+
+One violation in several thousand trees would have been nearly impossible to
+find by walking around, and would have produced exactly one mysterious spot in
+one world where the player got stuck.
+
+### A circular import, caught at runtime
+
+Splitting forests into their own module created a cycle: `placement` imported
+`defaultForests` from `forests`, and `forests` imported `slopeAt` from
+`placement`. TypeScript compiled it happily. At runtime:
+
+```
+ReferenceError: Cannot access 'defaultForests' before initialization
+```
+
+ES module cycles are resolved by hoisting, so a `const` in a partially-
+initialised module reads as uninitialised. The fix was to extract the shared
+function into `surface.ts`, which neither imports.
+
+Worth noting what caught this: **not** the typecheck, and not the build — both
+passed. Only executing the code did. It is a reminder that a green build is
+weaker evidence than it feels.
+
+---
+
 ## 12. Where this goes next
 
 - [x] **1 — Scaffold.** Build tooling, render loop, CI deploy.
@@ -1514,6 +1624,7 @@ mutating it, the other breaks silently.
 - [x] **5b — Scatter.** Instanced trees, rocks and shrubs, placed by rule.
 - [x] **6 — Collision.** Solid ground, world edges, trees and rocks.
 - [x] **7 — Shadows.** Sun shadows with a viewer-following shadow map.
+- [x] **8 — Forests.** Clustered woodland with irregular, walkable boundaries.
 - [ ] **Chunking.** Terrain tiles with LOD, for an endless world.
 
 
@@ -1548,6 +1659,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **Dispose** | Explicitly free a GPU resource; not automatic |
 | **Broad phase** | Cheap first pass narrowing what needs a real collision test |
 | **Cascaded shadows** | Several shadow maps at increasing scales |
+| **Circular import** | Two modules importing each other; fails at runtime |
 | **Draw call** | One instruction to the GPU; the real cost of many meshes |
 | **ES module** | Standard JavaScript `import`/`export` system |
 | **fBm** | Fractal Brownian motion — summed octaves of noise |
@@ -1565,6 +1677,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **Peter-panning** | Shadow detached from its caster, from excess bias |
 | **Shadow acne** | Self-shadowing stipple from depth imprecision |
 | **Shadow map** | Depth buffer rendered from the light's point of view |
+| **Spatial hash** | Grid of buckets keyed by cell, for fast proximity queries |
 | **Uniform grid** | Space divided into cells, for fast spatial lookup |
 | **Jittered grid** | Even-ish random placement; cheap Poisson-disc stand-in |
 | **Lockfile** | Exact recorded versions of every installed package |

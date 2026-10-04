@@ -531,7 +531,9 @@ viewer.onUpdate((dt) => {
   const depth = sea.visible ? sea.surfaceY - ground : 0;
   const depthLabel = depth > 0.05 ? ` · depth ${depth.toFixed(1)}` : '';
 
-  const props = scatter.visible ? ` · ${scatter.instanceCount.toLocaleString()} props` : '';
+  const props = scatter.visible
+    ? ` · ${scatter.instanceCount.toLocaleString()} props in ${scatter.forests} forests`
+    : '';
   const solid = collisionEnabled.on ? '' : ' · noclip';
 
   hud.textContent =
