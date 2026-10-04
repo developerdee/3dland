@@ -85,6 +85,10 @@ export class TerrainMesh {
 
     this.geometry = geometry;
     this.surface = new THREE.Mesh(geometry, this.surfaceMaterial);
+    // Terrain both receives shadows and casts them: a ridge shadowing the
+    // valley behind it is most of what makes low sun look right.
+    this.surface.receiveShadow = true;
+    this.surface.castShadow = true;
     this.wireframe = new THREE.Mesh(geometry, this.wireframeMaterial);
 
     this.group.add(this.surface, this.wireframe);

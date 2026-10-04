@@ -126,6 +126,10 @@ export class Scatter {
       // bounding sphere is effectively the whole terrain and culling it is
       // both wrong and pointless.
       mesh.frustumCulled = false;
+      mesh.castShadow = true;
+      // Receiving as well as casting means a tree's own canopy shades its
+      // trunk, which is cheap and reads much better than flat-lit props.
+      mesh.receiveShadow = true;
 
       this.meshes.push(mesh);
       this.group.add(mesh);

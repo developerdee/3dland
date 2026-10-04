@@ -30,6 +30,7 @@ It is written to be read in order. Each section builds on the previous one.
 11e. [Water](#11e-water)
 11f. [Scatter: placing thousands of objects](#11f-scatter-placing-thousands-of-objects)
 11g. [Collision](#11g-collision)
+11h. [Shadows](#11h-shadows)
 12. [Where this goes next](#12-where-this-goes-next)
 13. [Glossary](#13-glossary)
 
@@ -1391,6 +1392,118 @@ is fine, passing through it is not.
 
 ---
 
+## 11h. Shadows
+
+Shadows anchor objects to the ground. Without them trees appear to float, and
+terrain reads as a painted surface rather than something with form.
+
+### The resolution problem
+
+A directional light's shadow camera is **orthographic and finite** — it covers
+a box, and everything inside it shares one shadow map. So the question is how
+much world that box covers.
+
+Stretch one map over the whole 1000-unit world:
+
+| Map size | Units per texel |
+| --- | --- |
+| 1024² | 0.98 |
+| 2048² | 0.49 |
+| 4096² | 0.24 |
+
+A tree trunk is about half a unit wide, so its shadow is one or two texels:
+unrecognisable blocky mush. Even a 4096² map — 16MB of depth data — does not
+fix it.
+
+The answer is not a bigger map but a **smaller region**. Fit the shadow camera
+to a 160-unit area around the viewer and 2048² gives 6.4 texels per trunk, a
+properly readable shadow. Beyond that region there are no shadows, which looks
+far better than bad ones.
+
+This is a simplified form of what real engines do with **cascaded shadow maps**
+— several maps at increasing scales, so near shadows are crisp and distant ones
+coarse but present. One cascade is enough here.
+
+### Texel snapping, and shimmer
+
+Move the shadow camera continuously as the viewer walks, and the shadow map
+shifts by a fraction of a texel each frame. Every shadow edge then crawls and
+shimmers — the most noticeable shadow artefact there is, and much worse than a
+slightly misplaced shadow.
+
+The fix is to quantise the region centre to texel increments:
+
+```typescript
+const texelSize = this.span / this.sun.shadow.mapSize.width;
+this.target.x = Math.round(this.target.x / texelSize) * texelSize;
+this.target.z = Math.round(this.target.z / texelSize) * texelSize;
+```
+
+The shadow map now moves in discrete texel steps rather than sliding, so
+shadow edges stay put relative to the ground. Verified: 40 sub-texel movements
+produced 5 distinct centre positions rather than 40.
+
+### Shadow acne, and the two biases
+
+A surface lit at a glancing angle samples its own depth with limited
+precision, so parts of it conclude they are in shadow. The result is dark
+stippling — "shadow acne" — all over sunlit slopes.
+
+The classic fix is a depth bias, pushing samples away from the light. Overdo it
+and shadows detach from their casters, so a tree appears to hover above its own
+shadow: "peter-panning".
+
+```typescript
+this.sun.shadow.bias = -0.0008;
+this.sun.shadow.normalBias = 0.6;
+```
+
+`normalBias` is the better tool: it offsets the sample along the **surface
+normal** rather than toward the light, which scales naturally with how glancing
+the angle is. Steep terrain needs it most, and gets it automatically.
+
+### The bug the numbers caught
+
+The shadow camera's depth range was originally a fixed multiple of the region
+span. That works for a high sun, and fails badly for a low one.
+
+At a 2° elevation the light is nearly horizontal, so the region's footprint
+stretches **2,292 units** along the light's view axis — against a depth range
+of only 480. Terrain outside that range silently stops casting, precisely when
+shadows are longest and most dramatic.
+
+The depth range is now derived from the elevation itself:
+
+```typescript
+const elevationSine = Math.max(Math.abs(sunOffset.y), 0.08);
+const depthSpan = this.span / 2 / elevationSine;
+```
+
+Verified across elevations from 2° to 88°: the region is fully inside the
+shadow volume at every angle, and the near plane never goes non-positive.
+
+Worth noting what is *not* a problem: at 2° the far/near ratio reaches 2160,
+which would be alarming for a perspective camera. Orthographic depth is
+**linear**, so precision depends on the range rather than the ratio — even that
+case resolves to a fraction of a millimetre at 24-bit depth.
+
+### A coupling that had to be broken
+
+The water shader needs to know where the sun is, and had been reading
+`sun.position`. That worked until shadows started moving the light every frame
+to keep its shadow camera near the viewer.
+
+With the light now following you, its *position* no longer encodes its
+*direction* — so the water's specular highlight would have swung around as you
+walked. The sun direction is now held separately, and the light's position is
+derived from it rather than being the source of truth.
+
+This is a recurring shape in graphics code: one object's state means two
+different things to two different systems, and the day one system starts
+mutating it, the other breaks silently.
+
+---
+
 ## 12. Where this goes next
 
 - [x] **1 — Scaffold.** Build tooling, render loop, CI deploy.
@@ -1400,6 +1513,7 @@ is fine, passing through it is not.
 - [x] **5a — Water.** Depth colour, waves, Fresnel, shore foam.
 - [x] **5b — Scatter.** Instanced trees, rocks and shrubs, placed by rule.
 - [x] **6 — Collision.** Solid ground, world edges, trees and rocks.
+- [x] **7 — Shadows.** Sun shadows with a viewer-following shadow map.
 - [ ] **Chunking.** Terrain tiles with LOD, for an endless world.
 
 
@@ -1433,6 +1547,7 @@ earlier becomes a real decision rather than a theoretical one.
 | **Dependency** | External package your project uses |
 | **Dispose** | Explicitly free a GPU resource; not automatic |
 | **Broad phase** | Cheap first pass narrowing what needs a real collision test |
+| **Cascaded shadows** | Several shadow maps at increasing scales |
 | **Draw call** | One instruction to the GPU; the real cost of many meshes |
 | **ES module** | Standard JavaScript `import`/`export` system |
 | **fBm** | Fractal Brownian motion — summed octaves of noise |
@@ -1447,6 +1562,9 @@ earlier becomes a real decision rather than a theoretical one.
 | **LOD** | Level of detail — simpler geometry at distance |
 | **dvh** | Dynamic viewport height; tracks mobile browser chrome |
 | **Instancing** | Drawing many copies of one geometry in a single call |
+| **Peter-panning** | Shadow detached from its caster, from excess bias |
+| **Shadow acne** | Self-shadowing stipple from depth imprecision |
+| **Shadow map** | Depth buffer rendered from the light's point of view |
 | **Uniform grid** | Space divided into cells, for fast spatial lookup |
 | **Jittered grid** | Even-ish random placement; cheap Poisson-disc stand-in |
 | **Lockfile** | Exact recorded versions of every installed package |

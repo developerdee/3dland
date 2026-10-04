@@ -18,6 +18,7 @@ import { TerrainMesh } from './terrain/TerrainMesh';
 import { defaultShading, type TerrainShadingParams } from './terrain/TerrainMaterial';
 import { Water, defaultWater, type WaterParams } from './terrain/Water';
 import { Collision } from './engine/Collision';
+import { Shadows, type ShadowQuality } from './engine/Shadows';
 import { Scatter } from './terrain/Scatter';
 import { defaultScatter, type ScatterParams } from './terrain/placement';
 import { createTerrainGui } from './terrain/gui';
@@ -58,6 +59,20 @@ viewer.scene.add(ambient);
 const sun = new THREE.DirectionalLight(0xfff2d8, 2.6);
 sun.position.set(-70, 90, 50);
 viewer.scene.add(sun);
+// A directional light aims at its target object, so that target has to be in
+// the scene graph for its world matrix to be maintained.
+viewer.scene.add(sun.target);
+
+/**
+ * The sun's direction, held separately from `sun.position`.
+ *
+ * Shadows move the light every frame to keep its shadow camera near the
+ * viewer, so its position no longer encodes the direction. Anything needing
+ * "where is the sun" — the water shader — must read this instead.
+ */
+const sunDirection = new THREE.Vector3(-70, 90, 50).normalize();
+
+const shadows = new Shadows(viewer.renderer, sun);
 
 // --- Terrain ---
 
@@ -94,6 +109,11 @@ const scatterParams: ScatterParams = {
 };
 const scatterEnabled = { on: true };
 const collisionEnabled = { on: true };
+// Shadows are the most expensive single feature here — they re-render the
+// casters from the sun's point of view each frame — so phones start lower.
+const shadowQuality: { level: ShadowQuality } = {
+  level: touchDevice ? 'low' : 'medium',
+};
 const terrain = new TerrainMesh(params);
 terrain.applyShading(shading);
 viewer.scene.add(terrain.group);
@@ -133,19 +153,25 @@ const sunAngles = { azimuth: 135, elevation: 42 };
 function placeSun(): void {
   const az = THREE.MathUtils.degToRad(sunAngles.azimuth);
   const el = THREE.MathUtils.degToRad(sunAngles.elevation);
-  const d = 400;
-  sun.position.set(
-    Math.cos(el) * Math.sin(az) * d,
-    Math.sin(el) * d,
-    Math.cos(el) * Math.cos(az) * d,
-  );
+  sunDirection
+    .set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az))
+    .normalize();
+
+  // Without shadows nothing moves the light, so place it once here. With
+  // shadows on, follow() overrides this every frame.
+  sun.position.copy(sunDirection).multiplyScalar(400);
 
   // Water does its own lighting in a raw ShaderMaterial, so it has to be told
   // where the sun is — otherwise its specular highlight contradicts the
   // terrain's shading.
-  sea.setEnvironment(sun.position, sky.zenithColor, sky.horizonColor);
+  sea.setEnvironment(sunDirection, sky.zenithColor, sky.horizonColor);
 }
 placeSun();
+
+// Apply the initial quality: constructing Shadows configures nothing on its
+// own, so without this shadows would stay off until the dropdown was touched.
+shadows.set(shadowQuality.level);
+shadows.follow(viewer.camera, sunDirection);
 
 // --- Camera controls ---
 
@@ -201,6 +227,9 @@ function frameTerrain(): void {
 frameTerrain();
 
 viewer.onUpdate((dt) => cameraModes.update(dt));
+
+// Keep the shadow region centred on the viewer.
+viewer.onUpdate(() => shadows.follow(viewer.camera, sunDirection));
 
 // --- Debug GUI ---
 
@@ -272,6 +301,11 @@ const gui = createTerrainGui({
     scatterParams.densityScale = DENSITY_BY_QUALITY[quality.level];
     regenerate();
     gui.controllersRecursive().forEach((c) => c.updateDisplay());
+  },
+  shadows: shadowQuality,
+  onShadowChange: () => {
+    shadows.set(shadowQuality.level);
+    shadows.follow(viewer.camera, sunDirection);
   },
   collisionEnabled,
   onCollisionChange: (on) => collision.setEnabled(on),

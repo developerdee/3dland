@@ -192,6 +192,28 @@ that random placement produces.
 The prop meshes are built in code, not loaded — no assets, no download, and a
 variant is a parameter rather than another file.
 
+### Shadows
+
+The sun casts shadows from terrain and props. Terrain both casts and receives,
+so a ridge shadows the valley behind it — which is most of what makes a low sun
+look right.
+
+A single shadow map stretched over a 1000-unit world would give about half a
+unit per texel, so a half-unit tree trunk would cast a one-texel shadow. The
+shadow camera instead covers a region that follows the viewer, giving 5–9
+texels per trunk depending on quality. Beyond that region there are no shadows
+rather than bad ones.
+
+| Quality | Map | Region | Per trunk |
+| --- | --- | --- | --- |
+| low | 1024² | 110u | 4.7 texels |
+| medium | 2048² | 160u | 6.4 texels |
+| high | 4096² | 240u | 8.5 texels |
+
+Touch devices default to low, desktop to medium. Shadows are the most expensive
+single feature here — casters are re-rendered from the sun's view each frame —
+so this is the first control to reach for if frame rate suffers.
+
 ### Collision
 
 Solid in every mode: the ground is a floor you cannot pass through, the world
@@ -242,6 +264,7 @@ beaches stay at the waterline when you move it.
 | `band blend` | Softness of the transitions; 0 gives hard bands |
 | `colour variation` | Noise that breaks up flat colour |
 | `azimuth` / `elevation` | Sun direction, in degrees |
+| `shadows` | off / low / medium / high |
 
 Slope is the input altitude cannot give you: a cliff and a meadow at the same
 height should not look alike. It comes from the surface normals, read per-pixel
@@ -258,6 +281,7 @@ src/engine/CameraModes.ts   orbit/fly/walk switching, kept continuous
 src/engine/TouchControls.ts on-screen twin sticks for touch devices
 src/engine/ModeButtons.ts   on-screen mode switcher
 src/engine/Collision.ts     terrain, world-edge and prop collision
+src/engine/Shadows.ts       sun shadows, with the map following the viewer
 src/engine/Sky.ts           gradient sky dome, follows the camera
 src/terrain/heightmap.ts    noise -> heights (the generation maths)
 src/terrain/TerrainMesh.ts  heights -> renderable geometry
@@ -292,6 +316,7 @@ The intent is that stages 2 onward add modules without modifying `Viewer`.
 - [x] **5a — Water.** Depth-based colour, waves, Fresnel reflection, shore foam.
 - [x] **5b — Scatter.** Instanced trees, rocks and shrubs placed by rule.
 - [x] **6 — Collision.** Solid ground, world edges, trees and rocks.
+- [x] **7 — Shadows.** Sun shadows with a viewer-following shadow map.
 - [ ] **Chunking.** Terrain tiles with LOD, for a world without edges.
 
 

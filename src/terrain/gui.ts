@@ -37,6 +37,9 @@ export interface TerrainGuiOptions {
   water: WaterParams;
   waterEnabled: { on: boolean };
   onWaterChange: () => void;
+  /** Shadow quality. Higher covers more ground at finer resolution. */
+  shadows: { level: 'off' | 'low' | 'medium' | 'high' };
+  onShadowChange: () => void;
   /** Collision on or off, for inspecting the world unobstructed. */
   collisionEnabled: { on: boolean };
   onCollisionChange: (on: boolean) => void;
@@ -136,6 +139,10 @@ export function createTerrainGui(options: TerrainGuiOptions): GUI {
   const light = gui.addFolder('Sun');
   light.add(options.sun, 'azimuth', 0, 360, 1).name('azimuth°').onChange(options.onSunChange);
   light.add(options.sun, 'elevation', 2, 88, 1).name('elevation°').onChange(options.onSunChange);
+  light
+    .add(options.shadows, 'level', ['off', 'low', 'medium', 'high'])
+    .name('shadows')
+    .onChange(options.onShadowChange);
 
   const display = gui.addFolder('Display');
   display.add(view, 'wireframe').name('wireframe').onChange(onWireframeChange);
